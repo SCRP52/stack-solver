@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101511">
+  <meta name="description" content="Tìm và luyện chuỗi thao tác từ bộ bài mới tới stack riêng của bạn.">
+  <title>Stack Solver</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="./" aria-label="Trang Stack Solver"><span aria-hidden="true">♠</span> Stack Solver</a>
+    <button type="button" class="quiet" id="history-button">Đã lưu <span id="history-count">0</span></button>
+  </header>
+  <main>
+    <section class="intro">
+      <p class="eyebrow">Trainer / Level 3</p>
+      <h1>Đưa bài về stack.</h1>
+      <p>Tìm chuỗi faro, cut, run, cull hoặc chia tụ từ bộ mới tới stack bạn muốn luyện.</p>
+    </section>
+    <div class="layout">
+      <form id="solver-form" class="panel" novalidate>
+        <h2>Bộ bài</h2>
+        <label for="start">Thứ tự xuất phát</label>
+        <select id="start" data-lock>
+          <option value="ndo">NDO US · USPCC</option>
+          <option value="custom">Nhập thứ tự khác</option>
+        </select>
+        <p id="start-example" class="hint">A♥–K♥ · A♣–K♣ · K♦–A♦ · K♠–A♠</p>
+        <textarea id="start-custom" data-lock rows="3" hidden aria-label="Nhập 52 lá xuất phát" placeholder="AS 2S 3S …"></textarea>
+        <label for="target-preset">Nạp stack đích</label>
+        <select id="target-preset" data-lock><option value="">Chọn stack có sẵn</option></select>
+        <label for="target">Thứ tự stack đích <span id="card-count" class="counter">0/52</span></label>
+        <textarea id="target" data-lock rows="5" placeholder="AS 2S QD 10H …" autocapitalize="characters" spellcheck="false" aria-describedby="target-help"></textarea>
+        <p id="target-help" class="hint">Dán 52 lá, cách nhau bằng dấu cách, dấu phẩy hoặc xuống dòng.</p>
+        <div class="actions demo-actions">
+          <button type="button" class="secondary" id="demo" data-lock>Nạp ví dụ</button>
+          <button type="button" class="quiet" id="random" data-lock>Tạo stack ngẫu nhiên</button>
+        </div>
+        <label for="name">Tên để lưu <span class="muted">(tùy chọn)</span></label>
+        <input id="name" data-lock maxlength="60" type="text" placeholder="Stack của tôi">
+        <details class="settings">
+          <summary>Chọn nước đi và thời gian</summary>
+          <div class="options" id="move-options">
+            <label><input type="checkbox" id="out" data-lock checked> Faro out</label>
+            <label><input type="checkbox" id="in" data-lock checked> Faro in</label>
+            <label><input type="checkbox" id="near" data-lock checked> Faro lệch</label>
+            <label><input type="checkbox" id="cut" data-lock checked> Cut</label>
+            <label><input type="checkbox" id="triple" data-lock> Triple cut</label>
+            <label><input type="checkbox" id="run" data-lock checked> Run</label>
+            <label><input type="checkbox" id="reverse" data-lock checked> Đảo đoạn đầu</label>
+            <label><input type="checkbox" id="cull" data-lock checked> Cull</label>
+            <label><input type="checkbox" id="reverse-cull" data-lock checked> Reverse cull</label>
+            <label><input type="checkbox" id="deal" data-lock> Chia và gom tụ</label>
+          </div>
+          <p class="hint">Cull lấy tối đa 5 lá trong một lượt xòe, nạp từng lá sâu hơn vị trí cũ. Lá lấy trước phải nạp trước. Reverse cull đưa đúng lá đáy lên trên. Giữa hai lượt cull cần có một nước khác.</p>
+          <div class="fields">
+            <div><label for="cull-max">Số lá mỗi cull</label><select id="cull-max" data-lock><option value="1">Tối đa 1</option><option value="2">Tối đa 2</option><option value="3">Tối đa 3</option><option value="4">Tối đa 4</option><option value="5" selected>Tối đa 5</option></select></div>
+            <div><label for="run-max">Số lá tối đa khi run / đảo</label><input id="run-max" data-lock type="number" min="2" max="52" value="39" inputmode="numeric"></div>
+            <div><label for="faro-window">Faro lệch tối đa</label><input id="faro-window" data-lock type="number" min="1" max="25" value="8" inputmode="numeric"></div>
+            <div><label for="deal-max">Số tụ tối đa</label><input id="deal-max" data-lock type="number" min="2" max="10" value="10" inputmode="numeric"></div>
+            <div><label for="deal-order">Cách gom tụ</label><select id="deal-order" data-lock><option value="ordered">Theo vòng xuôi / ngược</option><option value="any">Gom tự do</option></select></div>
+            <div><label for="seconds">Thời gian tìm</label><select id="seconds" data-lock><option value="30">30 giây</option><option value="300" selected>5 phút</option><option value="600">10 phút</option></select></div>
+          </div>
+          <div class="options">
+            <label><input type="checkbox" id="faro-offsets" data-lock checked> Faro lệch xen ở mọi đoạn</label>
+            <label><input type="checkbox" id="cull-deeper" data-lock checked> Cho cull nạp vào giữa bộ</label>
+          </div>
+          <p class="hint">Chia theo vòng, đặt mỗi lá lên trên tụ đang chia. Gom tự do cho phép đổi thứ tự các tụ. Kết quả sẽ ghi thứ tự gom cụ thể. Tối đa 10 tụ.</p>
+          <label for="triple-splits">Mốc triple cut</label>
+          <input id="triple-splits" data-lock value="13,26,39" type="text">
+          <p class="hint">Run rút từng lá rồi đặt phần còn lại lên trên tụ run. Mỗi thao tác tính một nước.</p>
+        </details>
+        <p id="error" class="error" role="alert" hidden></p>
+        <div class="actions submit-row">
+          <button type="submit" class="primary" id="solve">Tìm đường về stack <span aria-hidden="true">↗</span></button>
+        </div>
+      </form>
+      <div class="right">
+        <section class="panel" id="work" aria-labelledby="work-heading">
+          <div class="panel-title"><h2 id="work-heading">Kết quả</h2><span class="status-pill" id="status">Chờ stack</span></div>
+          <p id="progress-message" class="result-message" role="status" aria-live="polite">Chọn stack đích hoặc dán thứ tự 52 lá để tìm đường.</p>
+          <div id="progress-block" hidden>
+            <progress id="meter" value="0" max="300" aria-label="Thời gian tìm kiếm"></progress>
+            <div class="metrics"><span id="elapsed">0:00</span><span id="proof">Chưa loại trừ lời giải ngắn hơn</span></div>
+            <button type="button" class="secondary" id="stop" hidden>Dừng tìm</button>
+          </div>
+          <article id="solution" hidden>
+            <div class="solution-top">
+              <div><strong id="move-total" class="move-total">0</strong><span class="muted"> nước</span></div>
+              <button type="button" class="secondary" id="copy">Chép chuỗi</button>
+            </div>
+            <div id="study" class="study" hidden>
+              <div class="study-controls">
+                <button type="button" class="quiet" id="previous" aria-label="Nước trước">←</button>
+                <span id="step-number">NDO</span>
+                <button type="button" class="quiet" id="next" aria-label="Nước sau">→</button>
+              </div>
+              <p id="step-detail" class="step-detail"></p>
+              <ol id="cull-events" class="cull-events" hidden></ol>
+              <div id="deck-grid" class="deck-grid" aria-label="Thứ tự 52 lá ở nước đang chọn"></div>
+            </div>
+            <ol id="step-list" class="step-list"></ol>
+            <p class="hint" id="saved-note"></p>
+          </article>
+        </section>
+      </div>
+    </div>
+  </main>
+  <dialog id="history">
+    <div class="panel-title"><h2>Chuỗi đã lưu</h2><form method="dialog"><button class="quiet" aria-label="Đóng">✕</button></form></div>
+    <ul id="history-list" class="history-list"></ul>
+    <p class="hint">Các stack và lời giải được lưu trong trình duyệt này.</p>
+  </dialog>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>

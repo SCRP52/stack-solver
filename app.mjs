@@ -1,0 +1,358 @@
+import { cullTimeline, defaults, demoStack, parseCards, displayCards, ndo } from './solver.mjs';
+import { findPreset, getPreset, presets } from './presets.mjs';
+
+const $ = id => document.getElementById(id);
+const storageKey = 'stack-solver-history-v1';
+const suits = { S: '♠', D: '♦', C: '♣', H: '♥' };
+const families = ['out', 'in', 'near', 'cut', 'triple', 'run', 'reverse', 'cull', 'deal'];
+const switches = [['faro-offsets', 'faroOffsets'], ['cull-deeper', 'cullDeeper'], ['reverse-cull', 'reverseCull']];
+const numeric = [['faro-window', 'faroWindow', 1, 25], ['run-max', 'runMax', 2, 52],
+  ['cull-max', 'cullMax', 1, 5], ['deal-max', 'dealMax', 2, 10]];
+let worker;
+let session;
+let currentStep = 0;
+let stepButtons = [];
+
+function readHistory() {
+  try { return JSON.parse(localStorage.getItem(storageKey)) || []; }
+  catch { return []; }
+}
+
+function writeHistory(records) {
+  try { localStorage.setItem(storageKey, JSON.stringify(records)); }
+  catch { return false; }
+  $('history-count').textContent = records.length;
+  return true;
+}
+
+function saveSolution() {
+  if (!session?.steps) return;
+  const records = readHistory();
+  const prior = records.find(entry => entry.key === session.key);
+  const usePrior = prior && (prior.steps.length < session.steps.length || (prior.optimal && !session.optimal));
+  const record = usePrior ? { ...prior, name: session.name } : { ...session };
+  $('saved-note').textContent = writeHistory([record, ...records.filter(entry => entry.key !== session.key)].slice(0, 12))
+    ? 'Đã lưu trên thiết bị này.' : 'Trình duyệt chưa cho lưu trên thiết bị này.';
+}
+
+function showError(message = '') {
+  $('error').textContent = message;
+  $('error').hidden = !message;
+}
+
+function updateCount() {
+  const raw = $('target').value.trim();
+  const count = raw ? raw.split(/[\s,;|/]+/).filter(Boolean).length : 0;
+  $('card-count').textContent = `${count}/52`;
+  $('card-count').classList.toggle('full', count === 52);
+}
+
+function updateStart() {
+  const preset = getPreset($('start').value);
+  $('start-custom').hidden = Boolean(preset);
+  $('start-example').hidden = !preset;
+  if (!preset) return;
+  const { cards } = preset;
+  $('start-example').textContent = preset.category === 'Bộ mới'
+    ? [0, 13, 26, 39].map(i => `${cardText(cards[i])}–${cardText(cards[i + 12])}`).join(' · ')
+    : `Lá đầu ${cardText(cards[0])} · lá thứ 26 ${cardText(cards[25])} · lá đáy ${cardText(cards[51])}`;
+}
+
+function loadCards(cards, name) {
+  $('target').value = cards.join(' ');
+  $('target-preset').value = findPreset(cards)?.id ?? '';
+  $('name').value = name;
+  showError();
+  updateCount();
+}
+
+function installPresetOptions() {
+  for (const id of ['start', 'target-preset']) {
+    const select = $(id);
+    select.replaceChildren();
+    if (id === 'target-preset') select.add(new Option('Chọn stack có sẵn', ''));
+    for (const category of ['Bộ mới', 'Stack']) {
+      const group = document.createElement('optgroup');
+      group.label = category;
+      for (const preset of presets.filter(entry => entry.category === category)) {
+        group.append(new Option(preset.label, preset.id));
+      }
+      select.append(group);
+    }
+    if (id === 'start') { select.add(new Option('Nhập thứ tự khác', 'custom')); select.value = 'ndo'; }
+  }
+}
+
+function setLocked(locked) {
+  $('solver-form').querySelectorAll('[data-lock]').forEach(control => { control.disabled = locked; });
+  $('solve').hidden = locked;
+  $('stop').hidden = !locked;
+}
+
+function moveName(step) {
+  return step.cards ? `${step.label} · ${step.cards.map(cardText).join(', ')}` : step.label;
+}
+
+function cardText(card) {
+  return card.slice(0, -1) + suits[card.at(-1)];
+}
+
+function instructions(step) {
+  if (!step) return 'Thứ tự trước khi bắt đầu. Đọc từ trái sang phải, rồi xuống dòng.';
+  const p = step.params;
+  if (step.kind === 'cull') return p.destinations
+    ? 'Xòe từ đầu xuống đáy. Các vị trí nạp được tính trên bộ sau lượt cull.'
+    : `Tách ${step.cards.map(cardText).join(' và ')} về cuối bộ theo thứ tự đã gặp.`;
+  if (step.kind === 'reverse-cull') return `Lấy ${cardText(step.cards[0])} từ đáy, nạp lên vị trí ${p.insertAt + 1}.`;
+  if (step.kind === 'cut') return `Chuyển ${p.n} lá đầu xuống cuối bộ.`;
+  if (step.kind === 'run') return `Run ${p.n} lá đầu, rồi đặt phần còn lại lên trên tụ vừa run.`;
+  if (step.kind === 'reverse') return `Run ${p.n} lá đầu để đảo thứ tự, rồi đặt phần còn lại xuống dưới tụ vừa run.`;
+  if (step.kind === 'triple') return `Chia sau lá ${p.a} và ${p.b}, rồi ráp ba tụ theo thứ tự ${p.order}.`;
+  if (step.kind === 'deal') return `Chia lần lượt từ tụ 1 tới tụ ${p.count} rồi lặp lại. Gom theo thứ tự từ đầu bộ xuống: ${p.order.join(' → ')}.`;
+  if (step.kind === 'weave') return `Chia ${p.split}/${52 - p.split}. A là tụ trên, B là tụ dưới. Xen theo thứ tự ${p.mask.match(/.{1,13}/g).join(' ')}.`;
+  const larger = p.spare === 'A' ? 'tụ trên' : 'tụ dưới';
+  const first = p.first === 'A' ? 'tụ trên' : 'tụ dưới';
+  const lead = p.lead ? `Chừa ${p.lead} lá đầu của ${larger}. ` : '';
+  const tail = p.tail ? ` Để ${p.tail} lá còn lại của ${larger} ở cuối.` : '';
+  return `Cắt ${p.split}/${52 - p.split}. ${lead}Xen bắt đầu từ ${first}.${tail}`;
+}
+
+function showStep(number) {
+  const { startCards, steps } = session;
+  currentStep = number;
+  const step = steps[number - 1];
+  $('step-number').textContent = number ? `Nước ${number}/${steps.length}` : 'Bộ xuất phát';
+  $('step-detail').textContent = instructions(step);
+  const events = step?.kind === 'cull' ? cullTimeline(step.params) : [];
+  $('cull-events').hidden = !events.length;
+  $('cull-events').replaceChildren(...events.map(event => {
+    const item = document.createElement('li');
+    const card = cardText(step.cards[event.card]);
+    item.textContent = event.type === 'pick' ? `Cull ${card} ở vị trí ${step.params.slots[event.card] + 1}`
+      : `Nạp ${card} vào vị trí ${step.params.destinations[event.card] + 1}`;
+    return item;
+  }));
+  $('previous').disabled = !number;
+  $('next').disabled = number === steps.length;
+  $('deck-grid').replaceChildren(...(step?.deck ?? startCards).map(card => {
+    const tile = document.createElement('span');
+    tile.className = /[DH]$/.test(card) ? 'card red' : 'card';
+    tile.textContent = cardText(card);
+    return tile;
+  }));
+  for (const [index, button] of stepButtons.entries()) button.setAttribute('aria-current', String(index + 1 === number));
+}
+
+function renderSolution() {
+  if (!session.steps) { $('solution').hidden = true; return; }
+  $('solution').hidden = false;
+  $('study').hidden = false;
+  $('move-total').textContent = session.steps.length;
+  $('copy').disabled = session.steps.length === 0;
+  stepButtons = session.steps.map((step, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'quiet';
+    const number = document.createElement('span');
+    number.className = 'number';
+    number.textContent = index + 1;
+    button.append(number, document.createTextNode(moveName(step)));
+    button.addEventListener('click', () => {
+      showStep(index + 1);
+      $('study').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    return button;
+  });
+  $('step-list').replaceChildren(...stepButtons.map(button => {
+    const item = document.createElement('li');
+    item.append(button);
+    return item;
+  }));
+  showStep(Math.min(currentStep, session.steps.length));
+}
+
+function formatTime(seconds) {
+  const time = Math.floor(seconds);
+  return `${Math.floor(time / 60)}:${String(time % 60).padStart(2, '0')}`;
+}
+
+function setProgress(message) {
+  session.provedThrough = message.provedThrough;
+  session.elapsed = message.seconds;
+  $('meter').value = message.seconds;
+  $('elapsed').textContent = formatTime(message.seconds);
+  $('proof').textContent = message.provedThrough > 0
+    ? `Đã loại chuỗi ≤ ${message.provedThrough} nước` : 'Đang so với các chuỗi ngắn hơn';
+}
+
+function finish(stopped = false) {
+  worker?.terminate();
+  worker = undefined;
+  setLocked(false);
+  if (session.steps) {
+    $('status').textContent = session.optimal ? 'Đã chứng minh' : 'Chuỗi tốt nhất đã tìm';
+    $('progress-message').textContent = session.optimal
+      ? 'Đây là chuỗi ngắn nhất với bộ nước đi bạn đã chọn.'
+      : `${stopped ? 'Đã dừng.' : 'Đã kết thúc lượt tìm.'} Bạn có thể học chuỗi này. Vẫn có thể tồn tại chuỗi ngắn hơn.`;
+    saveSolution();
+  } else {
+    $('status').textContent = stopped ? 'Đã dừng' : 'Chưa có chuỗi';
+    $('progress-message').textContent = stopped
+      ? 'Bạn đã dừng trước khi tìm được chuỗi.'
+      : 'Chưa tìm được chuỗi từ tập nước đi đã chọn. Có thể thử bật Cut và Cull.';
+  }
+  if (session.provedThrough < 1) $('proof').textContent = session.optimal ? 'Stack đã khớp' : 'Chưa loại trừ hết chuỗi ngắn';
+}
+
+function restore(entry) {
+  if (worker) return;
+  session = { ...entry };
+  $('start').value = findPreset(entry.startCards)?.id ?? 'custom';
+  $('start-custom').value = entry.startCards.join(' ');
+  updateStart();
+  loadCards(entry.targetCards, entry.name);
+  for (const family of families) $(family).checked = entry.options[family];
+  for (const [id, key] of switches) $(id).checked = entry.options[key] ?? false;
+  for (const [id, key] of [...numeric, ['deal-order', 'dealOrder'], ['triple-splits', 'tripleSplits']]) {
+    $(id).value = entry.options[key] ?? defaults[key];
+  }
+  currentStep = 0;
+  $('progress-block').hidden = true;
+  $('status').textContent = entry.optimal ? 'Đã chứng minh' : 'Đã lưu';
+  $('progress-message').textContent = entry.optimal ? 'Chuỗi ngắn nhất với bộ nước đã dùng khi lưu.' : 'Chuỗi hợp lệ đã lưu để học lại.';
+  $('saved-note').textContent = 'Đã lưu trên thiết bị này.';
+  renderSolution();
+  $('history').close();
+  $('work').scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function renderHistory() {
+  const entries = readHistory();
+  $('history-list').replaceChildren(...entries.map(entry => {
+    const item = document.createElement('li');
+    const load = document.createElement('button');
+    load.className = 'secondary';
+    load.textContent = `${entry.name} · ${entry.steps.length} nước`;
+    load.disabled = Boolean(worker);
+    load.addEventListener('click', () => restore(entry));
+    const remove = document.createElement('button');
+    remove.className = 'quiet';
+    remove.textContent = 'Xóa';
+    remove.addEventListener('click', () => {
+      writeHistory(readHistory().filter(record => record.key !== entry.key));
+      renderHistory();
+    });
+    item.append(load, remove);
+    return item;
+  }));
+  if (!entries.length) {
+    const item = document.createElement('li');
+    item.textContent = 'Chưa có chuỗi nào.';
+    $('history-list').append(item);
+  }
+}
+
+$('solver-form').addEventListener('submit', event => {
+  event.preventDefault();
+  if (worker) return;
+  showError();
+  try {
+    const startPreset = getPreset($('start').value);
+    const start = parseCards(startPreset ? startPreset.cards.join(' ') : $('start-custom').value);
+    const target = parseCards($('target').value);
+    const options = { ...defaults };
+    for (const family of families) options[family] = $(family).checked;
+    for (const [id, key] of switches) options[key] = $(id).checked;
+    for (const [id, key, min, max] of numeric) {
+      const value = Number($(id).value);
+      if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Giá trị cho phép từ ${min} đến ${max}.`);
+      options[key] = value;
+    }
+    options.tripleSplits = $('triple-splits').value;
+    options.dealOrder = $('deal-order').value;
+    if (!families.some(family => options[family]) && !options.reverseCull) throw new Error('Bật ít nhất một loại nước đi.');
+    const seconds = Number($('seconds').value);
+    const memory = navigator.deviceMemory || 4;
+    const limits = { seconds, maxStates: memory <= 2 ? 85_000 : memory <= 4 ? 180_000 : 340_000 };
+    session = { key: JSON.stringify([start, target, options]), name: $('name').value.trim() || 'Stack tự nhập',
+      startCards: displayCards(start), targetCards: displayCards(target), options, steps: null, optimal: false, provedThrough: 0, elapsed: 0 };
+    currentStep = 0;
+    renderSolution();
+    $('status').textContent = 'Đang tìm';
+    $('progress-message').textContent = 'Đang tìm chuỗi và kiểm tra các đường đi ngắn.';
+    $('progress-block').hidden = false;
+    $('meter').max = seconds;
+    $('meter').value = 0;
+    $('elapsed').textContent = '0:00';
+    $('proof').textContent = 'Chưa loại trừ lời giải ngắn hơn';
+    worker = new Worker(new URL('./worker.mjs', import.meta.url), { type: 'module' });
+    setLocked(true);
+    if (matchMedia('(max-width: 814px)').matches) $('work').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    worker.onmessage = ({ data }) => {
+      if (data.type === 'candidate') {
+        session.steps = data.steps;
+        $('progress-message').textContent = `Đã có chuỗi ${data.steps.length} nước. Đang tìm chuỗi ngắn hơn.`;
+        renderSolution();
+        saveSolution();
+      } else if (data.type === 'progress') {
+        setProgress(data);
+        $('status').textContent = { structured: 'Dò các cụm 13 lá', exact: 'Kiểm tra chuỗi ngắn', improve: 'Đang rút gọn' }[data.phase];
+      } else if (data.type === 'done') {
+        setProgress(data);
+        session.steps = data.steps;
+        session.optimal = data.optimal;
+        renderSolution();
+        finish();
+      } else if (data.type === 'error') {
+        finish(true);
+        $('progress-message').textContent = data.message;
+      }
+    };
+    worker.onerror = () => {
+      finish(true);
+      $('progress-message').textContent = 'Trình duyệt chưa khởi động được solver. Hãy mở trang qua HTTPS hoặc localhost.';
+    };
+    worker.postMessage({ start, target, options, limits });
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
+$('target').addEventListener('input', () => { $('target-preset').value = ''; updateCount(); showError(); });
+$('start').addEventListener('change', updateStart);
+$('target-preset').addEventListener('change', () => {
+  const preset = getPreset($('target-preset').value);
+  if (preset) loadCards(preset.cards, preset.label);
+});
+$('demo').addEventListener('click', () => {
+  $('start').value = 'ndo';
+  updateStart();
+  loadCards(demoStack().split(' '), 'Stack mẫu');
+});
+$('random').addEventListener('click', () => {
+  const cards = [...ndo];
+  for (let i = cards.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [cards[i], cards[j]] = [cards[j], cards[i]];
+  }
+  loadCards(cards, 'Stack ngẫu nhiên');
+});
+$('stop').addEventListener('click', () => finish(true));
+$('previous').addEventListener('click', () => showStep(currentStep - 1));
+$('next').addEventListener('click', () => showStep(currentStep + 1));
+$('copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(session.steps.map((step, index) => `${index + 1}. ${moveName(step)}`).join('\n'));
+    $('copy').textContent = 'Đã chép';
+    setTimeout(() => { $('copy').textContent = 'Chép chuỗi'; }, 1300);
+  } catch { $('saved-note').textContent = 'Trình duyệt chưa cho chép. Bạn vẫn có thể mở từng nước trong danh sách.'; }
+});
+$('history-button').addEventListener('click', () => { renderHistory(); $('history').showModal(); });
+$('history-count').textContent = readHistory().length;
+installPresetOptions();
+updateStart();
+updateCount();
+
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('./offline.js').catch(() => {});
+}

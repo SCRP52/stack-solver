@@ -58,6 +58,7 @@ progress { width: 100%; height: 7px; accent-color: var(--accent); margin: 13px 0
 .step-detail { min-height: 2.2em; color: var(--subtle); font-size: .85rem; margin: 2px 5px 9px; }
 .cull-events { margin: 0 0 10px; padding-left: 25px; font-size: .86rem; color: var(--subtle); }
 .cull-events li { padding-block: 2px; }
+.deck-grid .goal-card { outline: 1px solid var(--accent); outline-offset: -1px; }
 .deck-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
 .card { font-size: clamp(.65rem, 2.95vw, .83rem); min-width: 0; display: grid; place-items: center; border-radius: 4px; padding: 4px 1px; background: #e2e5d9; color: #20291f; font-weight: 800; }
 .card.red { color: #8e242e; }

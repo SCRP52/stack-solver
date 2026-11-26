@@ -29,14 +29,26 @@
         </select>
         <p id="start-example" class="hint">A♥–K♥ · A♣–K♣ · K♦–A♦ · K♠–A♠</p>
         <textarea id="start-custom" data-lock rows="3" hidden aria-label="Nhập 52 lá xuất phát" placeholder="AS 2S 3S …"></textarea>
-        <label for="target-preset">Nạp stack đích</label>
-        <select id="target-preset" data-lock><option value="">Chọn stack có sẵn</option></select>
-        <label for="target">Thứ tự stack đích <span id="card-count" class="counter">0/52</span></label>
-        <textarea id="target" data-lock rows="5" placeholder="AS 2S QD 10H …" autocapitalize="characters" spellcheck="false" aria-describedby="target-help"></textarea>
-        <p id="target-help" class="hint">Dán 52 lá, cách nhau bằng dấu cách, dấu phẩy hoặc xuống dòng.</p>
-        <div class="actions demo-actions">
-          <button type="button" class="secondary" id="demo" data-lock>Nạp ví dụ</button>
-          <button type="button" class="quiet" id="random" data-lock>Tạo stack ngẫu nhiên</button>
+        <label for="target-mode">Kiểu đích</label>
+        <select id="target-mode" data-lock>
+          <option value="full">Cả bộ 52 lá</option>
+          <option value="partial">Vài lá theo vị trí</option>
+        </select>
+        <div id="full-target">
+          <label for="target-preset">Nạp stack đích</label>
+          <select id="target-preset" data-lock><option value="">Chọn stack có sẵn</option></select>
+          <label for="target">Thứ tự stack đích <span id="card-count" class="counter">0/52</span></label>
+          <textarea id="target" data-lock rows="5" placeholder="AS 2S QD 10H …" autocapitalize="characters" spellcheck="false" aria-describedby="target-help"></textarea>
+          <p id="target-help" class="hint">Dán 52 lá, cách nhau bằng dấu cách, dấu phẩy hoặc xuống dòng.</p>
+          <div class="actions demo-actions">
+            <button type="button" class="secondary" id="demo" data-lock>Nạp ví dụ</button>
+            <button type="button" class="quiet" id="random" data-lock>Tạo stack ngẫu nhiên</button>
+          </div>
+        </div>
+        <div id="partial-target" hidden>
+          <label for="target-positions">Lá cần đặt</label>
+          <textarea id="target-positions" data-lock rows="3" placeholder="1=AS, 17=Q♣, 52=KD" autocapitalize="characters" spellcheck="false" aria-describedby="positions-help"></textarea>
+          <p id="positions-help" class="hint">Nhập vị trí và lá, ví dụ 1=AS, 17=Q♣, 52=KD. Đếm từ đầu bộ xuống. Các vị trí bỏ trống có thể là lá bất kỳ.</p>
         </div>
         <label for="name">Tên để lưu <span class="muted">(tùy chọn)</span></label>
         <input id="name" data-lock maxlength="60" type="text" placeholder="Stack của tôi">
@@ -55,7 +67,7 @@
             <label><input type="checkbox" id="reverse-cull" data-lock checked> Reverse cull</label>
             <label><input type="checkbox" id="deal" data-lock> Chia và gom tụ</label>
           </div>
-          <p class="hint">Cull lấy tối đa 5 lá trong một lượt xòe. Các lá có thể nằm rải rác. Nạp từng lá sâu hơn vị trí cũ theo thứ tự đã lấy. Reverse cull đưa đúng lá đáy lên trên. Giữa hai lượt cull cần có một nước khác.</p>
+          <p class="hint">Cull lấy tối đa 5 lá rải rác rồi nạp theo chiều xòe, ưu tiên từ dưới lên. Reverse cull bắt đầu từ đúng lá đáy. Giữa hai lượt cull cần có một nước khác.</p>
           <div class="fields">
             <div><label for="cull-max">Số lá mỗi cull</label><select id="cull-max" data-lock><option value="1">Tối đa 1</option><option value="2">Tối đa 2</option><option value="3">Tối đa 3</option><option value="4">Tối đa 4</option><option value="5" selected>Tối đa 5</option></select></div>
             <div><label for="run-max">Số lá tối đa khi run / đảo</label><input id="run-max" data-lock type="number" min="2" max="52" value="39" inputmode="numeric"></div>
@@ -65,7 +77,6 @@
             <div><label for="seconds">Thời gian tìm</label><select id="seconds" data-lock><option value="30">30 giây</option><option value="300" selected>5 phút</option><option value="600">10 phút</option></select></div>
           </div>
           <div class="options">
-            <label><input type="checkbox" id="faro-offsets" data-lock checked> Faro lệch xen ở mọi đoạn</label>
             <label><input type="checkbox" id="cull-deeper" data-lock checked> Cho cull nạp vào giữa bộ</label>
           </div>
           <p class="hint">Chia theo vòng, đặt mỗi lá lên trên tụ đang chia. Gom tự do cho phép đổi thứ tự các tụ. Kết quả sẽ ghi thứ tự gom cụ thể. Tối đa 10 tụ.</p>
@@ -82,7 +93,7 @@
       <div class="right">
         <section class="panel" id="work" aria-labelledby="work-heading">
           <div class="panel-title"><h2 id="work-heading">Kết quả</h2><span class="status-pill" id="status">Chờ stack</span></div>
-          <p id="progress-message" class="result-message" role="status" aria-live="polite">Chọn stack đích hoặc dán thứ tự 52 lá để tìm đường.</p>
+          <p id="progress-message" class="result-message" role="status" aria-live="polite">Chọn stack đích hoặc chỉ định vài lá cần đặt.</p>
           <div id="progress-block" hidden>
             <progress id="meter" value="0" max="300" aria-label="Thời gian tìm kiếm"></progress>
             <div class="metrics"><span id="elapsed">0:00</span><span id="proof">Chưa loại trừ lời giải ngắn hơn</span></div>
@@ -90,7 +101,7 @@
           </div>
           <article id="solution" hidden>
             <div class="solution-top">
-              <div><strong id="move-total" class="move-total">0</strong><span class="muted"> nước</span></div>
+              <div><strong id="move-total" class="move-total">0</strong><span class="muted"> nước</span><span id="move-culls" class="muted"></span></div>
               <button type="button" class="secondary" id="copy">Chép chuỗi</button>
             </div>
             <div id="route-picker" hidden>

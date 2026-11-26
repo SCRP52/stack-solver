@@ -12,20 +12,41 @@ const suits = { '♠': 'S', '♦': 'D', '♣': 'C', '♥': 'H' };
 
 export const defaults = {
   out: true, in: true, near: true, cut: true, multiCutOverhand: false, multiCutReorder: false, run: true, cull: true,
-  reverse: true, deal: false, dealMax: 10, dealOrder: 'ordered', faroOffsets: true,
+  reverse: true, deal: false, dealMax: 10, dealOrder: 'ordered',
   faroWindow: 8, runMax: 39, cullMax: 5, cullDeeper: true, reverseCull: true, multiCutSplits: '13,26,39',
 };
 
 export const mnemonica = '4C 2H 7D 3C 4H 6D AS 5H 9S 2S QH 3D QC 8H 6S 5S 9H KC 2D JH 3S 8S 6H 10C 5D KD 2C 3H 8D 5C KS JD 8C 10S KH JC 7S 10H AD 4S 7H 4D AC 9C JS QD 7C QS 10D 6C AH 9D';
 
+const normalizeCards = raw => raw.trim().toUpperCase().replace(/[♠♦♣♥]/g, suit => suits[suit]);
+const normalizeRank = card => card.replace(/^T([SDCH])$/, '10$1');
+
 export function parseCards(raw) {
-  const cards = raw.trim().toUpperCase().replace(/[♠♦♣♥]/g, suit => suits[suit])
-    .split(/[\s,;|/]+/).filter(Boolean).map(card => card.replace(/^T([SDCH])$/, '10$1'));
+  const cards = normalizeCards(raw).split(/[\s,;|/]+/).filter(Boolean).map(normalizeRank);
   const invalid = cards.find(card => !cardIds.has(card));
   if (invalid) throw new Error(`Không nhận ra lá ${invalid}. Dùng AS, 10D, QC hoặc A♠, 10♦, Q♣.`);
   if (new Set(cards).size !== cards.length) throw new Error('Có lá xuất hiện nhiều hơn một lần.');
   if (cards.length !== size) throw new Error(`Đang có ${cards.length}/52 lá. Hãy nhập đủ cả bộ, bỏ joker.`);
   return cards.map(card => cardIds.get(card)).join('');
+}
+
+export function parsePositions(raw) {
+  const entries = normalizeCards(raw).replace(/\s*[:=]\s*/g, '=').split(/[\s,;]+/).filter(Boolean);
+  if (!entries.length) throw new Error('Nhập ít nhất một vị trí và lá bài, ví dụ 1=AS, 17=QC.');
+  const slots = new Set();
+  const cards = new Set();
+  return entries.map(entry => {
+    const match = /^(\d+)=([A-Z0-9]+)$/.exec(entry);
+    if (!match) throw new Error(`Không đọc được ${entry}. Dùng dạng 1=AS hoặc 17=Q♣.`);
+    const position = Number(match[1]);
+    const card = cardIds.get(normalizeRank(match[2]));
+    if (position < 1 || position > size) throw new Error(`Vị trí ${position} nằm ngoài bộ 52 lá.`);
+    if (!card) throw new Error(`Không nhận ra lá ${match[2]}.`);
+    if (slots.has(position) || cards.has(card)) throw new Error('Mỗi vị trí và mỗi lá chỉ được dùng một lần.');
+    slots.add(position);
+    cards.add(card);
+    return [position - 1, card];
+  }).sort(([a], [b]) => a - b);
 }
 
 export const displayCards = state => [...state].map(letter => cardsById[index(letter)]);
@@ -70,14 +91,19 @@ function moveFromMap(kind, label, map, params, apply = state => applyMap(state, 
   return { kind, label, params, map, inverse, key, apply, undo: state => applyMap(state, inverse) };
 }
 
-export function makeCullMove(slots, landing, options = defaults) {
+const flipSlot = slot => size - 1 - slot;
+const flipSlots = slots => slots.map(flipSlot).reverse();
+
+export function makeCullMove(slots, landing, options = defaults, direction = 'down') {
   if (!options.cull || !slots.length || slots.length > options.cullMax) return null;
   const destinations = Array.isArray(landing) ? landing : slots.map((_, i) => landing + i);
   if (destinations.length !== slots.length) return null;
   if (slots.some((slot, i) => !Number.isInteger(slot) || slot < 0 || slot >= size || (i && slot <= slots[i - 1]))) return null;
-  if (destinations.some((dest, i) => !Number.isInteger(dest) || dest >= size || dest <= slots[i] || (i && dest <= destinations[i - 1]))) return null;
-  const toBottom = destinations.every((dest, i) => dest === size - slots.length + i);
-  if (!options.cullDeeper && !toBottom) return null;
+  const up = direction === 'up';
+  if (destinations.some((dest, i) => !Number.isInteger(dest) || dest < 0 || dest >= size ||
+    (up ? dest >= slots[i] : dest <= slots[i]) || (i && dest <= destinations[i - 1]))) return null;
+  const atEnd = destinations.every((dest, i) => dest === (up ? i : size - slots.length + i));
+  if (!options.cullDeeper && !atEnd) return null;
 
   const rest = positions.filter(i => !slots.includes(i));
   const loads = new Map(destinations.map((dest, i) => [dest, slots[i]]));
@@ -85,17 +111,18 @@ export function makeCullMove(slots, landing, options = defaults) {
   const map = positions.map(i => loads.get(i) ?? rest[next++]);
   const first = slots[0];
   const [insertAt] = destinations;
-  const label = `Cull ${slots.length} → ${toBottom ? 'đáy' : destinations.map(dest => `#${dest + 1}`).join(', ')}`;
-  const apply = slots.length === 1
+  const label = `Cull ${slots.length} · ${up ? 'dưới lên' : 'trên xuống'}`;
+  const apply = slots.length === 1 && !up
     ? state => state.slice(0, first) + state.slice(first + 1, insertAt + 1) + state[first] + state.slice(insertAt + 1)
     : state => applyMap(state, map);
-  return moveFromMap('cull', label, map, { slots, destinations }, apply);
+  return moveFromMap('cull', label, map, { slots, destinations, direction }, apply);
 }
 
 export function makeReverseCullMove(insertAt) {
   if (!Number.isInteger(insertAt) || insertAt < 0 || insertAt >= size - 1) return null;
   const map = positions.slice(0, insertAt).concat(size - 1, positions.slice(insertAt, -1));
-  return moveFromMap('reverse-cull', `Reverse cull → vị trí ${insertAt + 1}`, map, { slots: [size - 1], insertAt },
+  return moveFromMap('reverse-cull', 'Reverse cull · dưới lên', map,
+    { slots: [size - 1], destinations: [insertAt], insertAt, direction: 'up' },
     state => state.slice(0, insertAt) + state.at(-1) + state.slice(insertAt, -1));
 }
 
@@ -136,20 +163,29 @@ function* cyclicPileOrders(count) {
   }
 }
 
-export function cullTimeline({ slots, destinations }) {
+export function cullTimeline({ slots, destinations, direction = 'down' }) {
   if (!destinations) return [];
+  const up = direction === 'up';
+  if (up) { slots = flipSlots(slots); destinations = flipSlots(destinations); }
   const pickups = new Map(slots.map((slot, i) => [slot, i]));
   const loads = new Map(destinations.map((dest, i) => [dest, i]));
+  const cardIndex = index => up ? slots.length - 1 - index : index;
+  const originalSlot = slot => slot >= 0 && slot < size ? (up ? flipSlot(slot) : slot) : null;
   const events = [];
   let cursor = 0;
+  let previous = -1;
+  const pick = () => events.push({ type: 'pick', card: cardIndex(pickups.get(cursor++)) });
   for (let dest = 0; dest < size; dest++) {
     const load = loads.get(dest);
     if (load !== undefined) {
-      while (cursor <= slots[load]) events.push({ type: 'pick', card: pickups.get(cursor++) });
-      events.push({ type: 'load', card: load });
+      while (cursor <= slots[load]) pick();
+      const before = originalSlot(previous);
+      const after = originalSlot(cursor);
+      events.push({ type: 'load', card: cardIndex(load), above: up ? after : before, below: up ? before : after });
+      previous = slots[load];
     } else {
-      while (pickups.has(cursor)) events.push({ type: 'pick', card: pickups.get(cursor++) });
-      cursor++;
+      while (pickups.has(cursor)) pick();
+      previous = cursor++;
     }
   }
   return events;
@@ -185,10 +221,10 @@ export function makeMoves(options = defaults) {
         if (split === 26) continue;
         const spare = split > 26 ? 'A' : 'B';
         const extra = 2 * Math.abs(26 - split);
-        const maxLead = config.faroOffsets ? extra : 0;
-        for (let lead = 0; lead <= maxLead; lead++) {
-          const label = `Faro ${kind} ${split}/${size - split}${lead ? ` · chừa ${lead} đầu` : ''}`;
-          add('faro', label, weaveMap(interleave(split, first, lead)), { split, first, lead, spare, tail: extra - lead });
+        for (const lead of [0, extra]) {
+          const from = lead ? 'bottom' : 'top';
+          const label = `Faro ${kind} ${split}/${size - split} · xen từ ${lead ? 'đáy' : 'đầu'}`;
+          add('faro', label, weaveMap(interleave(split, first, lead)), { split, first, lead, spare, tail: extra - lead, from });
         }
       }
     }
@@ -261,11 +297,15 @@ export function makeMoves(options = defaults) {
     if (!Number.isInteger(config.cullMax) || config.cullMax < 1 || config.cullMax > 5) {
       throw new Error('Cull chỉ được lấy từ 1 đến 5 lá.');
     }
+    for (let a = 0; a < size; a++) {
+      keep(makeCullMove([a], 0, config, 'up'));
+      if (!wideCull && config.cullMax === 2) {
+        for (let b = a + 1; b < size; b++) keep(makeCullMove([a, b], 0, config, 'up'));
+      }
+    }
     function addCull(slots) {
-      const move = makeCullMove(slots, size - slots.length, config);
-      if (!move) return;
-      if (!unique.has(move.key)) unique.set(move.key, move);
-      culls.set(cullKey(slots), unique.get(move.key));
+      const move = keep(makeCullMove(slots, size - slots.length, config));
+      if (move) culls.set(cullKey(slots), move);
     }
     for (let a = 0; a < size; a++) {
       addCull([a]);
@@ -309,26 +349,31 @@ function findDirectCull(start, target, config) {
 
   const sourceSlots = new Uint8Array(size);
   for (let i = 0; i < size; i++) sourceSlots[index(start[i])] = i;
-  const slots = [];
-  const destinations = [];
-  let lastUnmoved = -1;
-  let lastPicked = -1;
-  // The cards left in the spread can only stay put or move towards the
-  // front. The cards displaced towards the back uniquely identify the held
-  // cards. Both streams have to preserve their original internal order.
-  for (let dest = 0; dest < size; dest++) {
-    const original = sourceSlots[index(target[dest])];
-    if (dest > original) {
-      if (slots.length === config.cullMax || original <= lastPicked) return null;
-      slots.push(original);
-      destinations.push(dest);
-      lastPicked = original;
-    } else {
-      if (original <= lastUnmoved) return null;
-      lastUnmoved = original;
+
+  function alongSpread(direction) {
+    const up = direction === 'up';
+    const slots = [];
+    const destinations = [];
+    let lastUnmoved = -1;
+    let lastPicked = -1;
+    // Read both streams in the direction of the spread. Only picked cards
+    // move further along that direction, and each stream preserves its order.
+    for (let dest = 0; dest < size; dest++) {
+      const originalSlot = sourceSlots[index(target[up ? flipSlot(dest) : dest])];
+      const original = up ? flipSlot(originalSlot) : originalSlot;
+      if (dest > original) {
+        if (slots.length === config.cullMax || original <= lastPicked) return null;
+        slots.push(original);
+        destinations.push(dest);
+        lastPicked = original;
+      } else {
+        if (original <= lastUnmoved) return null;
+        lastUnmoved = original;
+      }
     }
+    return makeCullMove(up ? flipSlots(slots) : slots, up ? flipSlots(destinations) : destinations, config, direction);
   }
-  return makeCullMove(slots, destinations, config);
+  return alongSpread('up') ?? alongSpread('down');
 }
 
 function findDirectDeal(start, target, max) {
@@ -370,9 +415,9 @@ function findDirectMultiCut(start, target, marks) {
 }
 
 function directExpandedMove(start, target, moves, allowCull = true) {
-  return (allowCull && moves.wideCull ? findDirectCull(start, target, moves.config) : null) ??
-    (moves.wideDeal ? findDirectDeal(start, target, moves.config.dealMax) : null) ??
-    (moves.wideMultiCut ? findDirectMultiCut(start, target, moves.wideMultiCut) : null);
+  return (moves.wideDeal ? findDirectDeal(start, target, moves.config.dealMax) : null) ??
+    (moves.wideMultiCut ? findDirectMultiCut(start, target, moves.wideMultiCut) : null) ??
+    (allowCull && moves.wideCull ? findDirectCull(start, target, moves.config) : null);
 }
 
 function findShallowRoutes(start, target, moves, expired, offer, enough) {
@@ -411,6 +456,106 @@ function findShallowRoutes(start, target, moves, expired, offer, enough) {
     }
   }
   return proved;
+}
+
+function completeTarget(state, required) {
+  const target = new Array(size);
+  const fixed = new Set();
+  for (const [slot, card] of required) {
+    target[slot] = card;
+    fixed.add(card);
+  }
+  let slot = 0;
+  for (const card of state) {
+    if (fixed.has(card)) continue;
+    while (target[slot]) slot++;
+    target[slot++] = card;
+  }
+  return target.join('');
+}
+
+function searchPartialShallow(start, required, moves, expired, offer, enough) {
+  const expanded = moves.wideCull || moves.wideDeal || moves.wideMultiCut;
+  const matches = state => required.every(([slot, card]) => state[slot] === card);
+  const afterOne = [];
+  for (const move of moves.list) {
+    if (expired()) return 0;
+    const state = move.apply(start);
+    if (matches(state)) offer([move]);
+    else afterOne.push([state, move]);
+  }
+  if (expanded) offer([directExpandedMove(start, completeTarget(start, required), moves)]);
+  for (const [state, first] of afterOne) {
+    if (expired() || enough(2)) return expanded ? 0 : 1;
+    for (const last of moves.list) {
+      if (!sameCull(first, last) && required.every(([slot, card]) => state[last.map[slot]] === card)) offer([first, last]);
+    }
+    if (expanded) offer([first, directExpandedMove(state, completeTarget(state, required), moves, !isCull(first))]);
+  }
+  if (expanded) {
+    for (const last of moves.list) {
+      if (expired() || enough(2)) break;
+      const before = required.map(([slot, card]) => [last.map[slot], card]);
+      offer([directExpandedMove(start, completeTarget(start, before), moves, !isCull(last)), last]);
+    }
+  }
+  return expanded ? 0 : 2;
+}
+
+function searchPractical(start, target, required, moves, expired, offer, enough) {
+  const operations = moves.list.filter(move => !isCull(move));
+  if (!operations.some(move => move.kind !== 'cut')) return;
+  const fixedSlots = new Int8Array(size).fill(-1);
+  for (const [slot, card] of required ?? [...target].map((card, slot) => [slot, card])) fixedSlots[index(card)] = slot;
+  const nextCard = new Int8Array(size);
+  if (!required) {
+    for (let i = 0; i < size; i++) nextCard[index(target[i])] = index(target[(i + 1) % size]);
+  }
+
+  function score(state) {
+    let value = 0;
+    let previous = index(state.at(-1));
+    for (let slot = 0; slot < size; slot++) {
+      const card = index(state[slot]);
+      const fixed = fixedSlots[card];
+      if (fixed >= 0) value += slot === fixed ? 12 : Math.max(0, 4 - Math.abs(slot - fixed));
+      if (!required && nextCard[previous] === card) value += 8;
+      previous = card;
+    }
+    return value;
+  }
+
+  function routeTo(node) {
+    const route = [];
+    for (; node.move; node = node.parent) route.push(node.move);
+    return route.reverse();
+  }
+
+  const beamWidth = 24;
+  let frontier = [{ state: start }];
+  const seen = new Set([start]);
+  let checked = 0;
+  for (let depth = 1; depth <= 12 && frontier.length && !enough(depth - 1); depth++) {
+    const candidates = new Map();
+    for (const parent of frontier) {
+      if (expired()) return;
+      if (parent.move) {
+        const finish = directExpandedMove(parent.state, required ? completeTarget(parent.state, required) : target, moves);
+        if (finish) offer([...routeTo(parent), finish]);
+      }
+      for (const move of operations) {
+        if ((++checked & 63) === 0 && expired()) return;
+        if (parent.move?.kind === 'cut' && move.kind === 'cut') continue;
+        const state = move.apply(parent.state);
+        if (seen.has(state)) continue;
+        const node = { state, parent, move };
+        if (required ? required.every(([slot, card]) => state[slot] === card) : state === target) offer(routeTo(node));
+        else if (!candidates.has(state)) candidates.set(state, { ...node, score: score(state) });
+      }
+    }
+    frontier = [...candidates.values()].sort((a, b) => b.score - a.score).slice(0, beamWidth);
+    for (const { state } of frontier) seen.add(state);
+  }
 }
 
 function cutAndAppend(route, move, moves) {
@@ -481,6 +626,7 @@ function buildWithInsertedCulls(start, target, moves, rotation) {
   function moveBefore(deck, cards, anchor) {
     const anchorAt = deck.indexOf(anchor);
     const slots = cards.map(card => deck.indexOf(card));
+    if (slots.every(slot => slot > anchorAt)) return makeCullMove(slots, anchorAt, moves.config, 'up');
     if (anchorAt === 0) return makeCullMove(slots, size - cards.length, moves.config);
     if (slots.some(slot => slot >= anchorAt)) return null;
     return makeCullMove(slots, anchorAt - cards.length, moves.config);
@@ -497,9 +643,12 @@ function buildWithInsertedCulls(start, target, moves, rotation) {
     let count = 1;
     while (count < moves.config.cullMax && end >= count &&
       relative(wanted[end - count]) < relative(wanted[end - count + 1])) count++;
-    const cards = Array.from(wanted.slice(end - count + 1, end + 1));
-
-    let cull = !isCull(route.at(-1)) ? moveBefore(state, cards, anchor) : null;
+    let cards = Array.from(wanted.slice(end - count + 1, end + 1));
+    let cull = null;
+    while (!isCull(route.at(-1)) && !(cull = moveBefore(state, cards, anchor)) && count > 1) {
+      cards = cards.slice(1);
+      count--;
+    }
     if (!cull) {
       const cut = moves.cuts.get(state.indexOf(cards[0])) ?? moves.cuts.get(anchorAt);
       if (!cut) return null;
@@ -756,20 +905,41 @@ function varyMove(state, target, moves, listed) {
   return listed[Math.floor(Math.random() * listed.length)];
 }
 
-export function solve(start, target, options, limits, notify = () => {}) {
+function routeCost(route) {
+  let culls = 0;
+  let cullCuts = 0;
+  let topDown = 0;
+  for (let i = 0; i < route.length; i++) {
+    const move = route[i];
+    if (!isCull(move)) continue;
+    culls++;
+    if (move.params.direction === 'down') topDown++;
+    if (route[i - 1]?.kind === 'cut') cullCuts++;
+    if (route[i + 1]?.kind === 'cut') cullCuts++;
+  }
+  return { score: route.length + 2 * culls + cullCuts, culls, topDown };
+}
+
+const compareRoutes = (a, b) => a.score - b.score || a.culls - b.culls || a.topDown - b.topDown || a.route.length - b.route.length;
+
+export function solve(start, requested, options, limits, notify = () => {}) {
   const moves = makeMoves(options);
   const expanded = moves.wideCull || moves.wideDeal || moves.wideMultiCut;
+  const required = Array.isArray(requested) ? requested : null;
+  const target = required ? completeTarget(start, required) : requested;
+  const matches = state => required ? required.every(([slot, card]) => state[slot] === card) : state === target;
+  const alreadyMatched = matches(start);
   const started = performance.now();
   const clock = { expired: () => performance.now() - started >= limits.seconds * 1000 };
   let previousReport = -Infinity;
   let best = null;
-  let provedThrough = start === target ? -1 : 0;
+  let provedThrough = alreadyMatched ? -1 : 0;
   let attempts = 0;
   let checked = 0;
   let lastCandidate = -Infinity;
   const choices = [];
   const maxChoices = 5;
-  const enough = maxLength => choices.length === maxChoices && choices.at(-1).route.length <= maxLength;
+  const enough = maxCost => choices.length === maxChoices && choices.at(-1).score <= maxCost;
 
   function report(phase, depth, count, force = false) {
     const elapsed = performance.now() - started;
@@ -783,64 +953,82 @@ export function solve(start, target, options, limits, notify = () => {}) {
     const now = performance.now();
     if (!best || (!force && now - lastCandidate < 175)) return;
     lastCandidate = now;
-    notify({ type: 'candidate', steps: choices[0].steps, routes: choices.map(choice => choice.steps) });
+    notify({ type: 'candidate', shortestLength: best.length, practicalScore: choices[0].score,
+      steps: choices[0].steps, routes: choices.map(choice => choice.steps) });
   }
 
   function offer(route, announce = false) {
-    if (!route || route.some(move => !move) || enough(route.length)) return;
-    const key = route.map(move => move.key).join('');
-    if (choices.some(choice => choice.key === key)) return;
+    if (!route || route.some(move => !move)) return;
+    if (required) {
+      let state = start;
+      const end = route.findIndex(move => { state = move.apply(state); return matches(state); });
+      if (end >= 0) route = route.slice(0, end + 1);
+    }
+    const candidate = { route, key: route.map(move => move.key).join(''), ...routeCost(route) };
+    const duplicate = choices.find(choice => choice.key === candidate.key);
+    if (duplicate && compareRoutes(candidate, duplicate) >= 0) return;
+    if (!duplicate && choices.length === maxChoices && route.length >= best.length && compareRoutes(candidate, choices.at(-1)) >= 0) return;
     for (let i = 1; i < route.length; i++) {
       if (route[i - 1].kind !== 'cut' || route[i].kind !== 'cut') continue;
       if ((route[i - 1].params.n + route[i].params.n) % size || !sameCull(route[i - 2], route[i + 1])) return;
     }
     const { final, steps } = replay(start, route);
-    if (final !== target) throw new Error('Chuỗi tìm được chưa về đúng stack đích.');
+    if (!matches(final)) throw new Error('Chuỗi tìm được chưa khớp vị trí đích.');
     const seen = new Map([[displayCards(start).join(','), 0]]);
     for (let i = 0; i < steps.length; i++) {
       const deck = steps[i].deck.join(',');
       if (seen.has(deck) && !sameCull(route[seen.get(deck) - 1], route[i + 1])) return;
       seen.set(deck, i + 1);
     }
-    choices.push({ key, route, steps });
-    choices.sort((a, b) => a.route.length - b.route.length);
-    if (choices.length > maxChoices) choices.pop();
-    best = choices[0].route;
+    if (duplicate) choices.splice(choices.indexOf(duplicate), 1);
+    choices.push({ ...candidate, steps });
+    choices.sort(compareRoutes);
+    // Keep one shortest chain alongside the most practical choices.
+    const shortest = choices.reduce((first, choice) => choice.route.length < first.route.length ? choice : first);
+    if (choices.length > maxChoices) choices.splice(shortest === choices.at(-1) ? maxChoices - 1 : maxChoices, 1);
+    best = shortest.route;
     provedThrough = Math.min(provedThrough, best.length - 1);
     if (announce) publishCandidate();
   }
 
-  if (start === target) offer([]);
+  if (alreadyMatched) offer([]);
   else {
-    const shallowDepth = findShallowRoutes(start, target, moves, clock.expired, offer, enough);
+    const shallowDepth = required
+      ? searchPartialShallow(start, required, moves, clock.expired, offer, enough)
+      : findShallowRoutes(start, target, moves, clock.expired, offer, enough);
     provedThrough = best ? Math.min(shallowDepth, best.length - 1) : shallowDepth;
     publishCandidate(true);
   }
-  if (start !== target && !clock.expired()) {
+  if (!alreadyMatched && !clock.expired()) {
     if (!best || best.length > provedThrough + 1 || choices.length < maxChoices) {
       report('structured', provedThrough, checked, true);
       const structuredUntil = started + Math.min(8, limits.seconds * 0.6) * 1000;
       offer(findStructured(start, target, moves, () => clock.expired() || performance.now() >= structuredUntil));
+      report('practical', provedThrough, checked, true);
+      const practicalUntil = performance.now() + Math.min(required ? 4 : 2, limits.seconds * 0.22) * 1000;
+      searchPractical(start, target, required, moves, () => clock.expired() || performance.now() >= practicalUntil, offer, enough);
       for (let rotation = 0; rotation < size && !clock.expired(); rotation++) {
-        offer(buildWithCulls(start, target, moves, rotation));
         offer(buildWithInsertedCulls(start, target, moves, rotation));
+        offer(buildWithCulls(start, target, moves, rotation));
       }
       offer(buildWithRuns(start, target, moves));
       publishCandidate(true);
     }
     let exact;
     if (!best || provedThrough < best.length - 1) {
-      const onProof = (phase, depth, count, force) => report(phase, expanded ? provedThrough : depth, count, force);
-      exact = findExact(start, target, moves, limits, onProof, clock, () => best, offer, enough);
+      const onProof = (phase, depth, count, force) => report(phase, expanded || required ? provedThrough : depth, count, force);
+      const guideUntil = performance.now() + Math.min(3, limits.seconds * 0.12) * 1000;
+      const exactClock = required ? { expired: () => clock.expired() || performance.now() >= guideUntil } : clock;
+      exact = findExact(start, target, moves, limits, onProof, exactClock, () => best, offer, enough);
       checked = exact.checked;
-      if (!expanded) provedThrough = Math.max(provedThrough, exact.depth);
+      if (!expanded && !required) provedThrough = Math.max(provedThrough, exact.depth);
     }
 
     const varied = moves.list.filter(move => !isCull(move));
     const canVary = varied.some(move => move.kind !== 'cut') || expanded;
-    const extraUntil = performance.now() + 1500;
+    const extraUntil = performance.now() + Math.min(6000, limits.seconds * 300);
     while (canVary && varied.length && !clock.expired() && (!exact?.exhausted || expanded) &&
-      (!best || provedThrough < best.length - 1 || (choices.length < maxChoices && performance.now() < extraUntil))) {
+      (!best || provedThrough < best.length - 1 || (!enough(best.length + 2) && performance.now() < extraUntil))) {
       report('improve', provedThrough, checked);
       if (!attempts && best) offer(shorten(best, moves, clock), true);
       let state = start;
@@ -850,17 +1038,19 @@ export function solve(start, target, options, limits, notify = () => {}) {
         const move = varyMove(state, target, moves, varied);
         prefix.push(move);
         state = move.apply(state);
+        if (required && matches(state)) break;
       }
       const rotation = Math.floor(Math.random() * size);
       const chooseCullTail = attempts % 2 ? buildWithCulls : buildWithInsertedCulls;
+      const goal = required ? completeTarget(state, required) : target;
       let permutation = '';
-      for (const card of target) permutation += ids[state.indexOf(card)];
-      const finishing = moves.unique.get(permutation) ?? directExpandedMove(state, target, moves);
-      const tail = state === target ? [] : finishing ? [finishing] : chooseCullTail(state, target, moves, rotation) ??
-        buildWithCulls(state, target, moves, rotation) ?? buildWithRuns(state, target, moves);
+      for (const card of goal) permutation += ids[state.indexOf(card)];
+      const finishing = moves.unique.get(permutation) ?? directExpandedMove(state, goal, moves);
+      const tail = matches(state) ? [] : finishing ? [finishing] : chooseCullTail(state, goal, moves, rotation) ??
+        buildWithCulls(state, goal, moves, rotation) ?? buildWithRuns(state, goal, moves);
       if (tail) {
         const route = prefix.concat(tail);
-        if (!enough(route.length + 5)) {
+        if (!enough(route.length - 4)) {
           offer(shorten(route, moves, clock), true);
           offer(route, true);
         }
@@ -868,8 +1058,10 @@ export function solve(start, target, options, limits, notify = () => {}) {
       attempts++;
     }
   }
+  if (best) provedThrough = Math.min(provedThrough, best.length - 1);
   const optimal = best !== null && provedThrough >= best.length - 1;
   return { type: 'done', optimal, provedThrough, checked, attempts, seconds: (performance.now() - started) / 1000,
+    shortestLength: best?.length ?? null, practicalScore: choices[0]?.score ?? null,
     steps: choices[0]?.steps ?? null, routes: choices.map(choice => choice.steps) };
 }
 

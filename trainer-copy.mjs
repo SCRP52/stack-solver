@@ -29,5 +29,4 @@ export const drillCopy = {
 export const groupCopy = {
   position: ['Vị trí', 'Position'], neighbour: ['Lá liền kề', 'Neighbour'], acaan: ['ACAAN', 'ACAAN'], quartet: ['Tứ quý', 'Quartet'],
   mate: ['Mate', 'Mate'], distance: ['Khoảng cách', 'Distance'], relative: ['Vị trí tương đối', 'Relative Position'], missing: ['Lá bị thiếu', 'Missing Card'],
-  restack: ['Restack', 'Restack'],
 };

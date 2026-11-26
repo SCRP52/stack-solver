@@ -110,7 +110,7 @@ test('every supported drill generates distinct prompts and grades the generated 
 test('Missing Card hides the range and supports segments from 5 to 26 cards', () => {
   const { cards } = presets[4];
   const model = stackModel(cards);
-  const pool = questionSet(model, advanced.missing, { random: () => 0.99 });
+  const pool = questionSet(model, ['single-missing', 'multiple-missing'], { random: () => 0.99 });
   const givenCards = new Set();
   const lengths = new Set();
   assert.equal(pool.length, 2 * 825);
@@ -153,7 +153,8 @@ test('A/B/C offers three distinct options with exactly one correct answer', () =
 
 test('Restack covers distinct shuffled segments and grades the exact order', () => {
   const { cards } = presets[4];
-  const pool = questionSet(stackModel(cards), advanced.restack, { random: () => 0.99 });
+  assert.ok(advanced.missing.includes('restack'));
+  const pool = questionSet(stackModel(cards), ['restack'], { random: () => 0.99 });
   const lengths = [...new Set(pool.map(q => q.shown.length))].sort((a, b) => a - b);
   assert.deepEqual(lengths, Array.from({ length: 22 }, (_, i) => i + 5));
   assert.equal(pool.length, 825);

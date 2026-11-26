@@ -7,8 +7,7 @@ export const advanced = {
   quartet: ['quartet-positions', 'quartet-order', 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank'],
   mate: ['mate-position', 'mate-distance', 'relative-mate'],
   distance: ['forward-distance', 'backward-distance', 'forward-offset', 'backward-offset'],
-  missing: ['single-missing', 'multiple-missing'],
-  restack: ['restack'],
+  missing: ['single-missing', 'multiple-missing', 'restack'],
 };
 
 const mod = value => (value % size + size) % size;
@@ -138,7 +137,7 @@ function shuffledCards(cards, random) {
 const rankOnly = new Set(['quartet-positions', 'quartet-order']);
 const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card']);
 const fullVariants = new Set(['cut-count', 'cut-card']);
-const segmentSkills = new Set([...advanced.missing, ...advanced.restack]);
+const segmentSkills = new Set(advanced.missing);
 
 export function questionSet(model, skills, { start = 1, end = size, random = Math.random, sequential = false, eligible = () => true } = {}) {
   const unique = new Set();

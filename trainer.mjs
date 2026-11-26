@@ -454,7 +454,6 @@ function showQuestion() {
   const isRestack = prompt.kind === 'restack';
   const restack = isRestack && !run.reveal;
   run.answered = false;
-  run.revealedAt = null;
   run.restack = null;
   $('session-mode').textContent = run.trial ? t('Thi', 'Time Trial') : t('Tập', 'Trainer');
   $('question-count').textContent = run.trial ? `${run.count + 1} / ${run.limit}` : t(`Câu ${run.count + 1}`, `Question ${run.count + 1}`);
@@ -469,7 +468,6 @@ function showQuestion() {
   $('question-cards').hidden = restack || !prompt.shown.length;
   $('answer-form').hidden = run.reveal;
   $('reveal-answer').hidden = !run.reveal;
-  $('self-grade').hidden = true;
   $('answer-choices').hidden = restack || !run.choice;
   $('answer-pad').hidden = restack || run.choice;
   $('restack-board').hidden = !restack;
@@ -492,12 +490,19 @@ function feedback(prompt, right, skipped) {
   $('feedback').hidden = false;
 }
 
+function showNextButton() {
+  const next = $('next-question');
+  next.textContent = run.count === run.limit ? t('Kết thúc lượt', 'Finish session') : t('Câu tiếp theo', 'Next question');
+  next.hidden = false;
+  next.focus();
+}
+
 function record(correct, values = [], skipped = false) {
   if (!run || run.answered) return;
   const prompt = run.questions[run.index];
   run.answered = true;
   run.count++;
-  const result = { prompt, correct, values, skipped, ms: (run.revealedAt ?? performance.now()) - run.questionStarted };
+  const result = { prompt, correct, values, skipped, ms: performance.now() - run.questionStarted };
   const trackedPrompt = run.restack && !correct && !skipped
     ? { ...prompt, focus: prompt.answer.filter((card, i) => card !== run.restack[i]) }
     : prompt;
@@ -515,11 +520,8 @@ function record(correct, values = [], skipped = false) {
     return;
   }
   $('answer-form').hidden = true;
-  $('self-grade').hidden = true;
   feedback(prompt, correct, skipped);
-  $('next-question').textContent = run.count === run.limit ? t('Kết thúc lượt', 'Finish session') : t('Câu tiếp theo', 'Next question');
-  $('next-question').hidden = false;
-  $('next-question').focus();
+  showNextButton();
 }
 
 function advanceQuestion() {
@@ -645,16 +647,13 @@ $('answer-form').addEventListener('submit', event => {
 });
 $('skip-answer').addEventListener('click', () => record(false, [], true));
 $('reveal-answer').addEventListener('click', () => {
-  if (!run?.reveal || run.revealedAt !== null) return;
-  run.revealedAt = performance.now();
+  if (!run?.reveal || run.answered) return;
+  run.answered = true;
+  run.count++;
   feedback(run.questions[run.index], null, false);
   $('reveal-answer').hidden = true;
-  $('self-grade').hidden = false;
-  $('mark-right').focus();
+  showNextButton();
 });
-for (const [id, correct] of [['mark-right', true], ['mark-wrong', false]]) {
-  $(id).addEventListener('click', () => { if (run?.revealedAt != null) record(correct); });
-}
 $('next-question').addEventListener('click', advanceQuestion);
 $('quit-practice').addEventListener('click', () => exitRound());
 $('back-to-practice').addEventListener('click', () => exitRound());

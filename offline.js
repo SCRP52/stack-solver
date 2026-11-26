@@ -1,4 +1,4 @@
-const cacheName = 'stack-solver-v27';
+const cacheName = 'stack-solver-v28';
 const assets = ['./', './index.html', './app.css', './app.mjs', './i18n.mjs', './solver.mjs', './presets.mjs', './worker.mjs',
   './trainer.html', './trainer.css', './trainer.mjs', './trainer-copy.mjs', './trainer-progress.mjs', './drills.mjs', './stack-library.mjs'];
 

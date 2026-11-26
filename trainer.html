@@ -111,7 +111,7 @@
                 <select id="answer-mode">
                   <option id="choice-mode" value="choice" data-en="Choose A/B/C">Chọn A/B/C</option>
                   <option id="manual-mode" value="manual" selected>Nhập trên màn hình</option>
-                  <option id="reveal-mode" value="reveal" data-en="Reveal · self-grade">Reveal · tự chấm</option>
+                  <option id="reveal-mode" value="reveal">Reveal</option>
                 </select>
               </div>
             </div>
@@ -154,10 +154,6 @@
           </form>
           <button type="button" class="primary session-actions" id="reveal-answer" hidden data-en="Reveal answer">Lật đáp án</button>
           <div id="feedback" role="status" hidden></div>
-          <div id="self-grade" class="actions session-actions" hidden>
-            <button type="button" class="secondary" id="mark-wrong" data-en="I missed it">Mình trả lời sai</button>
-            <button type="button" class="primary" id="mark-right" data-en="I got it">Mình trả lời đúng</button>
-          </div>
           <button type="button" class="primary session-actions" id="next-question" hidden data-en="Next question">Câu tiếp theo</button>
         </div>
         <section id="trial-results" hidden aria-labelledby="results-title">

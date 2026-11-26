@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { presets } from '../presets.mjs';
 import { advanced, basic, buildQuestion, grade, questionSet, stackModel } from '../drills.mjs';
-import { library, saveStack, stackOrder } from '../stack-library.mjs';
+import { cardLabel, library, saveStack, stackOrder } from '../stack-library.mjs';
 import { readProgress, saveProgress, slowCards, summarize, weakCards } from '../trainer-progress.mjs';
 import { drillCopy } from '../trainer-copy.mjs';
 import { parseCards, parsePositions, solve } from '../solver.mjs';
@@ -41,11 +41,7 @@ test('all 52 cut states produce the right ACAAN and relative positions on every 
         assert.equal(afterCut[wanted - 1], card);
         const cutCard = buildQuestion(model, 'cut-card', index, variant);
         assert.deepEqual(cutCard?.answer ?? null, amount ? [afterCut.at(-1)] : null);
-        const [offsetCard] = buildQuestion(model, 'offset-order', index, variant).answer;
-        const offsetPosition = buildQuestion(model, 'offset-order', index, variant).args[1];
-        assert.equal(rotated[offsetPosition - 1], offsetCard);
         assert.equal(buildQuestion(model, 'relative-position', index, variant).answer[0], rotated.indexOf(card) + 1);
-        assert.equal(buildQuestion(model, 'relative-card', index, variant).answer[0], rotated[index]);
       }
     }
   }
@@ -63,16 +59,38 @@ test('neighbours stay within a study range and use the cycle for full decks', ()
   assert.equal(buildQuestion(model, 'next', 51).answer[0], cards[0]);
 });
 
-test('distance, number between, offset and bottom count are distinct', () => {
+test('distance, offset and bottom count are distinct', () => {
   const { cards } = presets[5];
   const model = stackModel(cards);
   assert.equal(buildQuestion(model, 'forward-distance', 51).answer[0], 1);
   assert.equal(buildQuestion(model, 'backward-distance', 51).answer[0], 51);
-  assert.equal(buildQuestion(model, 'between', 51).answer[0], 0);
   assert.equal(buildQuestion(model, 'forward-offset', 51).answer[0], cards[0]);
   assert.equal(buildQuestion(model, 'backward-offset', 0).answer[0], cards[51]);
   assert.equal(buildQuestion(model, 'bottom-position', 51).answer[0], 1);
   assert.equal(buildQuestion(model, 'bottom-card', 0).answer[0], cards[0]);
+});
+
+test('Offset Order shuffles all unique bottom and position combinations without giving away answers', () => {
+  const { cards } = presets[4];
+  const model = stackModel(cards);
+  const ordered = questionSet(model, ['offset-order'], { sequential: true });
+  const shuffled = questionSet(model, ['offset-order'], { random: () => 0 });
+  const keys = prompts => prompts.map(prompt => JSON.stringify(prompt.args));
+  const orderedKeys = keys(ordered);
+  const shuffledKeys = keys(shuffled);
+  assert.equal(ordered.length, 52 * 51);
+  assert.equal(new Set(shuffledKeys).size, ordered.length);
+  assert.notDeepEqual(shuffledKeys, orderedKeys);
+  assert.deepEqual(new Set(shuffledKeys), new Set(orderedKeys));
+  const byLabel = new Map(cards.map(card => [cardLabel(card), card]));
+  for (const { args: [bottomLabel, position], answer: [card] } of shuffled) {
+    const bottom = byLabel.get(bottomLabel);
+    const split = cards.indexOf(bottom) + 1;
+    const rotated = cards.slice(split).concat(cards.slice(0, split));
+    assert.ok(position >= 1 && position <= 51);
+    assert.equal(card, rotated[position - 1]);
+    assert.notEqual(card, bottom);
+  }
 });
 
 test('Quartet and Mate match the actual rank, suit and relative order', () => {

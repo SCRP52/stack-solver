@@ -218,8 +218,13 @@ function newRound(event) {
     $('practice-status').textContent = t('Chưa có câu phù hợp với vùng và kiểu ôn này.', 'No questions match this range and review focus yet.');
     return;
   }
-  run = { trial, questions, options, skills, index: 0, results: [], self: !trial && $('answer-mode').value === 'self',
-    limit: trial ? Number($('trial-count').value) : Infinity, started: performance.now(), count: 0 };
+  const requested = trial ? Number($('trial-count').value) : questions.length;
+  const limit = Math.min(requested, questions.length);
+  run = { trial, questions, limit, index: 0, results: [], self: !trial && $('answer-mode').value === 'self',
+    started: performance.now(), count: 0 };
+  $('trial-size-note').hidden = limit === requested;
+  $('trial-size-note').textContent = t(`Bài đã chọn có ${limit} câu khác nhau. Lượt thi dùng toàn bộ số câu này.`,
+    `The selected drills have ${limit} unique questions. This trial uses all of them.`);
   renderSetup();
   showQuestion();
   if (trial) { tick(); timer = setInterval(tick, 200); }
@@ -257,7 +262,6 @@ function showQuestion() {
       input.autocapitalize = 'characters';
       input.spellcheck = false;
       input.autocomplete = 'off';
-      if (!numeric) input.placeholder = prompt.answer.length > 1 ? 'AS 2H …' : 'AS';
       field.append(label, input);
       return field;
     }));
@@ -296,20 +300,19 @@ function record(correct, values = [], skipped = false) {
   $('self-grade').hidden = true;
   $('answer-error').hidden = true;
   feedback(prompt, correct, skipped);
+  $('next-question').textContent = run.count === run.limit ? t('Kết thúc lượt', 'Finish session') : t('Câu tiếp theo', 'Next question');
   $('next-question').hidden = false;
   $('next-question').focus();
 }
 
 function advanceQuestion() {
-  run.index++;
-  if (run.index >= run.questions.length) {
-    const last = run.questions.at(-1);
-    run.questions = questionSet(model, run.skills, run.options);
-    if (!run.options.sequential && run.questions.length > 1 && promptText(run.questions[0]) === promptText(last)) {
-      run.questions.push(run.questions.shift());
-    }
-    run.index = 0;
+  if (run.count >= run.limit) {
+    const count = run.count;
+    exitRound();
+    $('practice-status').textContent = t(`Đã làm hết ${count} câu khác nhau trong lượt này.`, `You finished all ${count} unique questions in this session.`);
+    return;
   }
+  run.index++;
   showQuestion();
 }
 

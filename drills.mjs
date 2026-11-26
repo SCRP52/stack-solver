@@ -5,8 +5,8 @@ export const advanced = {
   acaan: ['cut-count', 'cut-card', 'offset-order'],
   quartet: ['quartet-positions', 'quartet-order', 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank'],
   mate: ['mate-position', 'mate-distance', 'relative-mate'],
-  distance: ['forward-distance', 'backward-distance', 'forward-offset', 'backward-offset', 'between'],
-  relative: ['relative-position', 'relative-card', 'bottom-position', 'bottom-card'],
+  distance: ['forward-distance', 'backward-distance', 'forward-offset', 'backward-offset'],
+  relative: ['relative-position', 'bottom-position', 'bottom-card'],
   missing: ['single-missing', 'multiple-missing', 'shuffled-missing'],
 };
 
@@ -90,16 +90,19 @@ export function buildQuestion(model, skill, index, variant = 0) {
       const mate = cardRank + mateSuit[suit(card)];
       if (skill === 'mate-position') return ask([face], slot(mate) + 1, [card, mate]);
       if (skill === 'mate-distance') return ask([face], forwardDistance(index, slot(mate)), [card, mate]);
-      return ask([face, cardLabel(bottom)], positionAfterCut(slot(mate), cut), [card, mate, bottom]);
+      return mate === bottom ? null : ask([face, cardLabel(bottom)], positionAfterCut(slot(mate), cut), [card, mate, bottom]);
     }
     case 'forward-distance': return ask([face, cardLabel(other)], forwardDistance(index, otherIndex), [card, other]);
     case 'backward-distance': return ask([face, cardLabel(other)], forwardDistance(otherIndex, index), [card, other]);
-    case 'between': return ask([face, cardLabel(other)], forwardDistance(index, otherIndex) - 1, [card, other]);
     case 'forward-offset': return ask([face, variant + 1], other, [card, other]);
     case 'backward-offset': return ask([face, variant + 1], at(index - variant - 1), [card, at(index - variant - 1)]);
     case 'relative-position': return ask([cardLabel(bottom), face], positionAfterCut(index, cut), [card, bottom]);
-    case 'relative-card':
-    case 'offset-order': return ask([cardLabel(bottom), fromTop], at(cut + index), [bottom, at(cut + index)]);
+    case 'offset-order': {
+      if (fromTop === size) return null;
+      const bottomCard = at(variant);
+      const answer = at(variant + fromTop);
+      return ask([cardLabel(bottomCard), fromTop], answer, [bottomCard, answer]);
+    }
     case 'bottom-position': return ask([face], fromBottom);
     case 'bottom-card': return ask([fromBottom], card);
     case 'single-missing':
@@ -127,40 +130,41 @@ function shuffle(items, random) {
 }
 
 const rankOnly = new Set(['quartet-positions', 'quartet-order']);
-const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card', 'offset-order']);
+const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card']);
+const fullVariants = new Set(['cut-count', 'cut-card', 'offset-order']);
 
 export function questionSet(model, skills, { start = 1, end = size, random = Math.random, sequential = false, eligible = () => true } = {}) {
+  const unique = new Set();
   const buckets = skills.map(skill => {
-    const seen = new Set();
-    const variants = fixed.has(skill) ? 1 : 8;
+    const seenRanks = new Set();
+    const variants = fixed.has(skill) ? 1 : fullVariants.has(skill) ? size : advanced.missing.includes(skill) ? 7 : size - 1;
     const items = [];
     for (let index = start - 1; index < end; index++) {
       if (start !== 1 || end !== size) {
         if ((skill === 'previous' && index === start - 1) || (skill === 'next' && index === end - 1)) continue;
       }
-      const key = rank(model.cards[index]);
-      if (rankOnly.has(skill) && seen.has(key)) continue;
-      seen.add(key);
-      const firstVariant = sequential ? index % 13 : Math.floor(random() * 45);
-      for (let i = 0; i < variants; i++) {
-        const prompt = buildQuestion(model, skill, index, (firstVariant + i) % 51);
-        if (prompt && eligible(prompt)) items.push(prompt);
+      if (rankOnly.has(skill)) {
+        const key = rank(model.cards[index]);
+        if (seenRanks.has(key)) continue;
+        seenRanks.add(key);
+      }
+      for (let variant = 0; variant < variants; variant++) {
+        const prompt = buildQuestion(model, skill, index, variant);
+        if (!prompt || !eligible(prompt)) continue;
+        const key = JSON.stringify([prompt.kind, prompt.args, prompt.shown]);
+        if (unique.has(key)) continue;
+        unique.add(key);
+        items.push(prompt);
       }
     }
     return sequential ? items : shuffle(items, random);
   });
-  if (!sequential) shuffle(buckets, random);
   const questions = [];
-  const seen = new Set();
   const count = Math.max(0, ...buckets.map(bucket => bucket.length));
   for (let i = 0; i < count; i++) {
+    if (!sequential) shuffle(buckets, random);
     for (const bucket of buckets) {
-      const prompt = bucket[i];
-      if (!prompt) continue;
-      const key = JSON.stringify([prompt.kind, prompt.args, prompt.shown]);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      questions.push(prompt);
+      if (bucket[i]) questions.push(bucket[i]);
     }
   }
   return questions;

@@ -1,5 +1,5 @@
 import { createStableCardGate } from './assistant-scan-logic.mjs?v=39';
-import { findCardCorners } from './assistant-corners.mjs?v=40';
+import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=41';
 import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
 
 const $ = id => document.getElementById(id);
@@ -9,8 +9,8 @@ ocrCrop.width = 32;
 ocrCrop.height = 40;
 
 const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const suitNames = { S: ['Bích', 'Spades'], H: ['Cơ', 'Hearts'], D: ['Rô', 'Diamonds'], C: ['Chuồn', 'Clubs'] };
 const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
+const suits = Object.keys(suitSymbols);
 const suitCanvases = makeSuitTemplates();
 const rankCanvases = makeRankTemplates();
 const stretchedRanks = Object.fromEntries(ranks.map(rank => [
@@ -31,7 +31,7 @@ function text(vi, en) { return isEnglish() ? en : vi; }
 
 function makeSuitTemplates() {
   const result = {};
-  for (const suit of Object.keys(suitNames)) {
+  for (const suit of suits) {
     const canvas = document.createElement('canvas');
     canvas.width = 32;
     canvas.height = 40;
@@ -120,42 +120,61 @@ function maskOf(imageData) {
   return { mask: normalized };
 }
 
+function maskRows(mask) {
+  const rows = new Uint32Array(40);
+  for (let y = 0; y < 40; y++) for (let x = 0; x < 32; x++) rows[y] |= mask[y * 32 + x] << x;
+  return rows;
+}
+
+function countBits(value) {
+  value -= (value >>> 1) & 0x55555555;
+  value = (value & 0x33333333) + ((value >>> 2) & 0x33333333);
+  return Math.imul((value + (value >>> 4)) & 0x0f0f0f0f, 0x01010101) >>> 24;
+}
+
 function compareMasks(a, b) {
   let best = 0;
   for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
     let intersection = 0, union = 0;
-    for (let y = 2; y < 38; y++) for (let x = 2; x < 30; x++) {
-      const ai = a[y * 32 + x];
-      const bx = x + dx, by = y + dy;
-      const bi = bx >= 0 && bx < 32 && by >= 0 && by < 40 ? b[by * 32 + bx] : 0;
-      if (ai && bi) intersection++;
-      if (ai || bi) union++;
+    for (let y = 2; y < 38; y++) {
+      const ai = a[y] & 0x3ffffffc;
+      const shifted = dx < 0 ? b[y + dy] << -dx : b[y + dy] >>> dx;
+      const bi = shifted & 0x3ffffffc;
+      intersection += countBits(ai & bi);
+      union += countBits(ai | bi);
     }
     if (union) best = Math.max(best, intersection / union);
   }
   return best;
 }
 
-function glyphMask(ink, frameWidth, glyph, mirrored) {
+function glyphMask(frameWidth, glyph, { cos, sin }, mirrored) {
+  const pixels = new Set();
+  for (const part of glyph.parts ?? [glyph]) for (const pixel of part.pixels) pixels.add(pixel);
   const mask = new Uint8Array(32 * 40);
   const scale = Math.min(26 / glyph.w, 34 / glyph.h);
   const width = Math.round(glyph.w * scale), height = Math.round(glyph.h * scale);
   const left = Math.floor((32 - width) / 2), top = Math.floor((40 - height) / 2);
   for (let y = 0; y < height; y++) {
-    const sourceY = glyph.y + Math.min(glyph.h - 1, Math.floor(y / scale));
+    const viewY = glyph.y + Math.min(glyph.h - 1, Math.floor(y / scale));
     for (let x = 0; x < width; x++) {
       const offset = Math.min(glyph.w - 1, Math.floor(x / scale));
-      const sourceX = mirrored ? glyph.right - offset : glyph.x + offset;
-      mask[(top + y) * 32 + left + x] = ink[sourceY * frameWidth + sourceX];
+      const viewX = mirrored ? glyph.right - offset : glyph.x + offset;
+      const sourceX = Math.round(viewX * cos - viewY * sin);
+      const sourceY = Math.round(viewX * sin + viewY * cos);
+      if (sourceX >= 0 && sourceX < frameWidth && pixels.has(sourceY * frameWidth + sourceX)) {
+        mask[(top + y) * 32 + left + x] = 1;
+      }
     }
   }
   return mask;
 }
 
 function matchShapes(sample, templates, labels) {
+  const rows = maskRows(sample);
   return labels.map(label => ({
     label,
-    score: Math.max(...templates[label].map(template => compareMasks(sample, template.mask))),
+    score: Math.max(...templates[label].map(template => compareMasks(rows, template.rows ??= maskRows(template.mask)))),
   })).sort((a, b) => b.score - a.score);
 }
 
@@ -206,31 +225,37 @@ function readRank(mask, glyph) {
   if (!strongShape && !matchesText) return null;
   // A pip from the main artwork can sit directly over another pip in the same suit.
   // Compare the first shape against both alphabets before treating it as a rank.
-  const [pip] = matchShapes(mask, suitCanvases, glyph.red ? ['D', 'H'] : ['S', 'C']);
+  const [pip] = matchShapes(mask, suitCanvases, suits);
   return pip.score > Math.max(.66, best.score + .055) ? null : best;
 }
 
-function readSuit(mask, red) {
-  const matches = matchShapes(mask, suitCanvases, red ? ['D', 'H'] : ['S', 'C']);
+function readSuit(mask, rank, suit) {
+  // Rank and suit shapes can remain clear even when white balance changes the perceived ink color.
+  const matches = matchShapes(mask, suitCanvases, suits);
   const [best, next] = matches;
-  return best.score >= .59 && best.score - next.score >= (red ? .044 : .016) ? best : null;
+  const redSuit = label => label === 'D' || label === 'H';
+  const sameInk = rank.red === suit.red;
+  const gap = best.score - next.score;
+  const clubDiamond = (best.label === 'C' && next.label === 'D') || (best.label === 'D' && next.label === 'C');
+  if (sameInk && redSuit(best.label) !== suit.red) return null;
+  const minGap = clubDiamond ? .047 : sameInk && redSuit(next.label) !== suit.red ? .019 : .028;
+  return best.score >= .59 && gap >= minGap ? best : null;
 }
 
-function readCorner(ink, width, { rank, suit, leftEdge, rightEdge, upperEdge }) {
+function readCornerView(width, { rank, suit, rotation, leftEdge, rightEdge, upperEdge }) {
   const sideEdge = Math.min(leftEdge, rightEdge);
   if (Math.min(sideEdge, upperEdge) > .5) return null;
-  const suitMask = glyphMask(ink, width, suit, false);
-  const bestSuit = readSuit(suitMask, suit.red);
+  const bestSuit = readSuit(glyphMask(width, suit, rotation, false), rank, suit);
   if (!bestSuit) return null;
 
   // Near a distinct left or right card edge, we know which way the index was printed.
   let bestRank;
   const edgeDifference = leftEdge - rightEdge;
   if (Math.abs(edgeDifference) >= .28) {
-    bestRank = readRank(glyphMask(ink, width, rank, edgeDifference > 0), rank);
+    bestRank = readRank(glyphMask(width, rank, rotation, edgeDifference > 0), rank);
   } else {
-    const normal = readRank(glyphMask(ink, width, rank, false), rank);
-    const mirrored = readRank(glyphMask(ink, width, rank, true), rank);
+    const normal = readRank(glyphMask(width, rank, rotation, false), rank);
+    const mirrored = readRank(glyphMask(width, rank, rotation, true), rank);
     if (normal && mirrored && normal.label !== mirrored.label && Math.abs(normal.score - mirrored.score) < .1) return null;
     bestRank = normal && (!mirrored || normal.score >= mirrored.score) ? normal : mirrored;
   }
@@ -239,15 +264,38 @@ function readCorner(ink, width, { rank, suit, leftEdge, rightEdge, upperEdge }) 
   return { rank: bestRank.label, suit: bestSuit.label, score: (bestRank.score + bestSuit.score) / 2 };
 }
 
-function cornerMotion(previous, current, { width, height }, { rank, suit }) {
+function readCorner(width, corner) {
+  const primary = readCornerView(width, corner);
+  const { rank, suit, rotation } = corner;
+  const dx = (rank.x + rank.right - suit.x - suit.right) / 2;
+  const dy = (suit.y + suit.bottom - rank.y - rank.bottom) / 2;
+  const correction = Math.atan2(dx, dy);
+  if (Math.abs(correction) < .12 || Math.abs(correction) > .51 || (primary && primary.score > .85)) return primary;
+
+  const straightened = cardRotation(rotation.angle + correction);
+  const alternate = readCornerView(width, {
+    ...corner, rotation: straightened,
+    rank: projectGlyph(rank, width, straightened),
+    suit: projectGlyph(suit, width, straightened),
+  });
+  if (!primary || !alternate) return primary ?? alternate;
+  const same = primary.rank === alternate.rank && primary.suit === alternate.suit;
+  if (!same && Math.abs(primary.score - alternate.score) < .075) return null;
+  return primary.score >= alternate.score ? primary : alternate;
+}
+
+function cornerMotion(previous, current, { width, height }, { rank, suit, rotation }) {
   if (previous?.length !== current.length) return Infinity;
   const margin = Math.max(2, Math.round(rank.h * .15));
-  const left = Math.max(0, Math.min(rank.x, suit.x) - margin);
-  const right = Math.min(width - 1, Math.max(rank.right, suit.right) + margin);
+  const left = Math.min(rank.x, suit.x) - margin;
+  const right = Math.max(rank.right, suit.right) + margin;
+  const { cos, sin } = rotation;
   let difference = 0, samples = 0;
-  for (let y = Math.max(0, rank.y - margin); y <= Math.min(height - 1, suit.bottom + margin); y++) {
+  for (let y = rank.y - margin; y <= suit.bottom + margin; y++) {
     for (let x = left; x <= right; x++) {
-      const i = y * width + x;
+      const sourceX = Math.round(x * cos - y * sin), sourceY = Math.round(x * sin + y * cos);
+      if (sourceX < 0 || sourceX >= width || sourceY < 0 || sourceY >= height) continue;
+      const i = sourceY * width + sourceX;
       difference += Math.abs(previous[i] - current[i]);
       samples++;
     }
@@ -258,14 +306,14 @@ function cornerMotion(previous, current, { width, height }, { rank, suit }) {
 export function scanCardFrame(frame, history) {
   const { width, height } = frame;
   const context = frame.getContext('2d', { willReadFrequently: true });
-  const { corners, ink, gray, paper } = findCardCorners(context.getImageData(0, 0, width, height));
+  const { corners, gray, paper } = findCardCorners(context.getImageData(0, 0, width, height));
   const previous = history.get(width);
   history.clear();
   history.set(width, gray);
 
   let best = null;
   for (const corner of corners) {
-    const card = readCorner(ink, width, corner);
+    const card = readCorner(width, corner);
     if (!card) continue;
     const score = corner.quality + card.score * .45;
     if (!best || score > best.score) best = { card, corner, score };

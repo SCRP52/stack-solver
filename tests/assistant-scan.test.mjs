@@ -42,10 +42,47 @@ test('does not propose a card when the suit index is hidden', () => {
 test('groups a one-pixel 1 with the printed zero in either mirror direction', () => {
   for (const mirrored of [false, true]) {
     const { corners } = findCardCorners(cornerFrame({ ten: true, mirrored }));
-    assert.equal(corners.length, 1);
-    assert.equal(corners[0].rank.double, true);
-    assert.equal(corners[0].rank.w, 8);
+    const upright = corners.filter(corner => corner.rotation.angle === 0);
+    assert.equal(upright.length, 1);
+    assert.equal(upright[0].rank.double, true);
+    assert.equal(upright[0].rank.w, 8);
   }
+});
+
+function turnFrame({ data, width, height }, angle) {
+  const result = new Uint8ClampedArray(data.length);
+  const centerX = (width - 1) / 2, centerY = (height - 1) / 2;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const sourceX = Math.round((x - centerX) * cos + (y - centerY) * sin + centerX);
+    const sourceY = Math.round(-(x - centerX) * sin + (y - centerY) * cos + centerY);
+    if (sourceX >= 0 && sourceX < width && sourceY >= 0 && sourceY < height) {
+      const source = (sourceY * width + sourceX) * 4;
+      result.set(data.subarray(source, source + 4), (y * width + x) * 4);
+    }
+  }
+  return { data: result, width, height };
+}
+
+test('finds the rank above the suit after a quarter turn, half turn, or diagonal turn', () => {
+  for (const angle of [Math.PI / 2, -Math.PI / 2, Math.PI, Math.PI / 4, Math.PI / 8]) {
+    const { corners } = findCardCorners(turnFrame(cornerFrame({ x: 62, y: 43 }), angle));
+    const match = corners.find(({ rank, suit, rotation }) =>
+      rank.h > suit.h && Math.cos(rotation.angle - angle) > .92);
+    assert.ok(match, `No matching card corner at ${angle} radians`);
+  }
+});
+
+test('estimates warm lighting from the card paper before classifying black ink', () => {
+  const frame = cornerFrame();
+  for (let i = 0; i < frame.data.length; i += 4) {
+    frame.data[i] += 37;
+    frame.data[i + 1] += 13;
+    frame.data[i + 2] += 3;
+  }
+  const [corner] = findCardCorners(frame).corners;
+  assert.equal(corner.rank.red, false);
+  assert.equal(corner.suit.red, false);
 });
 
 test('accepts either camera orientation and rejects conflicting reads', () => {

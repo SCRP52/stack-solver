@@ -32,3 +32,43 @@ export const groupCopy = {
   mate: ['Mate', 'Mate'], distance: ['Khoảng cách', 'Distance'], bottom: ['Đếm từ đáy', 'Bottom Count'],
   relative: ['Vị trí sau khi cắt', 'Relative Position'], missing: ['Lá bị thiếu', 'Missing Card'],
 };
+
+export const drillDetails = {
+  'card-position': ['Nhìn một lá và nhớ số vị trí của nó trong stack gốc.', 'See a card and recall its position in the original stack.'],
+  'position-card': ['Nhìn số vị trí và nhớ lá nằm ở đó trong stack gốc.', 'See a position and recall the card at that position in the original stack.'],
+  previous: ['Nhìn một lá và nhớ lá ngay trước nó theo thứ tự stack.', 'See a card and recall the one immediately before it in stack order.'],
+  next: ['Nhìn một lá và nhớ lá ngay sau nó theo thứ tự stack.', 'See a card and recall the one immediately after it in stack order.'],
+  'bottom-card': ['Cho một số đếm từ đáy. Nhớ lá ở vị trí đó trong stack gốc.', 'Given a position counted from the bottom, recall the card in the original stack.'],
+  'bottom-position': ['Cho một lá. Đếm vị trí của nó từ đáy stack gốc, với lá đáy là 1.', 'Find a card’s position from the bottom of the original stack. The bottom card counts as 1.'],
+  'relative-position': ['Cho lá đáy mới và một lá cần tìm. Tính vị trí mới của lá đó từ trên xuống.', 'Given a new bottom card and a target card, find the target’s position from the top after the cut.'],
+  'relative-card': ['Cho lá đáy mới và một số tính từ trên xuống. Nhớ lá ở vị trí đó sau khi cắt.', 'Given a new bottom card and a position from the top, identify the card after the cut.'],
+  'cut-count': ['Cho một lá và vị trí đích. Tính số lá cần chuyển từ đầu xuống đáy.', 'Given a card and target position, calculate how many cards to move from the top to the bottom.'],
+  'cut-card': ['Cho một lá và vị trí đích. Xác định lá cần cắt ngay sau nó để đưa lá đã cho về đúng vị trí.', 'Given a card and target position, identify the card you must cut immediately after.'],
+  'quartet-positions': ['Từ một giá trị bài, nhớ vị trí của cả bốn lá. Nhập bốn số theo thứ tự bất kỳ.', 'Given a rank, recall all four positions in any order.'],
+  'quartet-order': ['Xếp bốn lá cùng giá trị theo thứ tự xuất hiện trong stack gốc.', 'Recall the order in which the four cards of a rank appear in the original stack.'],
+  'quartet-distances': ['Từ lá đã cho, đi qua ba lá cùng giá trị và tính số bước của từng chặng.', 'From the given card, go through the three other cards of the same rank and count the steps in each gap.'],
+  'relative-quartet': ['Tưởng tượng đưa lá đã cho lên đầu. Nhớ vị trí mới của ba lá cùng giá trị theo thứ tự bất kỳ.', 'Imagine cutting the given card to the top. Recall the new positions of the other three cards of its rank in any order.'],
+  'quartet-numbers': ['Chỉ nhớ các số vị trí của tứ quý trong stack gốc hoặc sau khi cắt. Có thể nhập các số theo thứ tự bất kỳ.', 'Recall only the quartet positions in the original stack or after a cut. Enter the numbers in any order.'],
+  'next-rank': ['Đi xuôi từ lá đã cho để tìm lá cùng giá trị gần nhất.', 'Go forward from the given card to find the next card of the same rank.'],
+  'previous-rank': ['Đi ngược từ lá đã cho để tìm lá cùng giá trị gần nhất.', 'Go backward from the given card to find the nearest card of the same rank.'],
+  'mate-position': ['Tìm vị trí của lá cùng giá trị và cùng màu với lá đã cho.', 'Recall the position of the other card with the same rank and color.'],
+  'mate-distance': ['Tính số bước đi xuôi từ một lá đến lá cùng giá trị và cùng màu với nó.', 'Count the forward steps from a card to the other card of the same rank and color.'],
+  'relative-mate': ['Cho lá đáy mới. Tìm vị trí sau khi cắt của lá cùng giá trị và cùng màu với lá đã cho.', 'Given the new bottom card, locate the target’s mate after the cut.'],
+  'count-steps': ['Cho hai lá và chiều đi. Tính số bước từ lá đầu đến lá đích theo vòng stack.', 'Given two cards and a direction, count the steps from the starting card to the target around the stack.'],
+  'find-by-steps': ['Cho một lá, số bước và chiều đi. Xác định lá đến sau khi đi đủ số bước theo vòng stack.', 'Given a card, a direction and a number of steps, identify the card reached around the stack.'],
+  'single-missing': ['Tự xác định hai đầu của đoạn bài đã xáo rồi tìm một lá bị thiếu ở giữa. Đoạn dài từ 5 đến 26 lá.', 'Identify the ends of a shuffled segment of 5–26 cards and find the one missing card between them.'],
+  'multiple-missing': ['Tự xác định hai đầu của đoạn bài đã xáo rồi tìm hai lá bị thiếu ở giữa. Thứ tự nhập tùy ý.', 'Identify the ends of the shuffled segment and find the two missing cards between them. Enter them in any order.'],
+  restack: ['Nhìn một đoạn từ 5 đến 26 lá đã xáo và chạm từng lá để xếp lại theo stack từ trên xuống.', 'See a shuffled segment of 5–26 cards and tap the cards in stack order from top to bottom.'],
+};
+
+export const groupDetails = {
+  position: ['Luân phiên nhìn lá để nhớ vị trí và nhìn vị trí để nhớ lá.', 'Alternate between recalling a position from its card and a card from its position.'],
+  neighbour: ['Nhớ lá ngay trước hoặc ngay sau lá đã cho.', 'Recall the card immediately before or after the given card.'],
+  bottom: ['Đổi qua lại giữa tên lá và vị trí đếm từ đáy của stack gốc.', 'Switch between a card and its position counted from the bottom of the original stack.'],
+  relative: ['Dựa vào lá đáy mới để đổi qua lại giữa tên lá và vị trí từ trên xuống sau khi cắt.', 'Use the new bottom card to switch between cards and positions after a cut.'],
+  acaan: ['Đưa lá đã cho tới một vị trí đích bằng một lần cắt. Câu hỏi sẽ yêu cầu số lá cần cắt hoặc lá tại điểm cắt.', 'Use one cut to put the given card at the target position. Recall either the cut count or the card to cut after.'],
+  quartet: ['Luyện vị trí, thứ tự và khoảng cách của bốn lá cùng giá trị, kể cả sau khi cắt.', 'Practice the positions, order and spacing of cards of the same rank, including after a cut.'],
+  mate: ['Luyện tìm vị trí và khoảng cách tới lá cùng giá trị, cùng màu với lá đã cho.', 'Practice locating the card of the same rank and color and finding its distance.'],
+  distance: ['Luân phiên đếm số bước giữa hai lá và tìm lá đích từ một số bước, theo cả hai chiều.', 'Alternate between counting steps between cards and finding a card by steps, in either direction.'],
+  missing: ['Luân phiên tìm một hoặc hai lá thiếu và xếp lại một đoạn bài đã xáo.', 'Alternate between finding one or two missing cards and putting a shuffled segment back in order.'],
+};

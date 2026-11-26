@@ -2,7 +2,7 @@ import { cardLabel, languageKey, library, libraryKey, readLocal, redCard, saveSt
 import { message } from './i18n.mjs';
 import { ranks } from './solver.mjs';
 import { advanced, answerChoices, basic, grade, questionSet, stackModel } from './drills.mjs';
-import { drillCopy, groupCopy } from './trainer-copy.mjs';
+import { drillCopy, drillDetails, groupCopy, groupDetails } from './trainer-copy.mjs?v=30';
 import { activeStackKey, readProgress, saveProgress, slowCards, summarize, weakCards } from './trainer-progress.mjs';
 
 const $ = id => document.getElementById(id);
@@ -30,12 +30,14 @@ let selectedStack;
 let order;
 let model;
 let progress;
-let view = 'learn';
+let view = 'home';
 let studyStyle = 'flip';
 let studyIndex = 1;
 let flipped = false;
 let level = 'basic';
 let mode = 'train';
+let selectedDrill = '';
+let settingsBack = '#home';
 let run;
 let timer;
 let roundEndMessage = '';
@@ -133,45 +135,62 @@ function renderStudy() {
 function activeGroups() { return level === 'basic' ? basicGroups : advanced; }
 
 function currentSkills() {
-  const value = $('skill').value;
   const groups = activeGroups();
-  if (!value || value === 'all') return Object.values(groups).flat();
-  if (value.startsWith('group:')) return groups[value.slice(6)];
-  return combinedDrills[value]?.skills ?? [value];
+  if (selectedDrill === 'all') return Object.values(groups).flat();
+  if (selectedDrill.startsWith('group:')) return groups[selectedDrill.slice(6)];
+  return combinedDrills[selectedDrill]?.skills ?? [selectedDrill];
 }
 
-function fillSkills(value = 'all') {
-  const selector = $('skill');
-  selector.replaceChildren(new Option(t('Trộn tất cả', 'Mix all drills'), 'all'));
-  for (const [key, skills] of Object.entries(activeGroups())) {
-    const name = t(...groupCopy[key]);
-    const group = element('optgroup');
-    group.label = name;
+function directoryGroups() {
+  if (level === 'beyond') return [];
+  return Object.entries(activeGroups()).map(([key, skills]) => {
     const choices = key === 'distance' ? ['count-steps', 'find-by-steps'] : key === 'quartet' ? ['quartet-numbers', ...skills] : skills;
-    for (const kind of choices) {
-      const combined = combinedDrills[kind];
-      group.append(new Option(combined ? t(...combined.label) : drillName(kind), kind));
-    }
-    if (skills.length > 1) {
-      const mix = new Option(t(`Trộn ${name}`, `Mix ${name}`), `group:${key}`);
-      group.insertBefore(mix, key === 'bottom' ? null : group.firstChild);
-    }
-    selector.append(group);
+    return { key, choices: skills.length > 1 ? [...choices, `group:${key}`] : choices };
+  });
+}
+
+function drillTitle(drill) {
+  if (drill === 'all') return t('Trộn tất cả', 'Mix all drills');
+  if (drill.startsWith('group:')) {
+    const name = t(...groupCopy[drill.slice(6)]);
+    return t(`Trộn ${name}`, `Mix ${name}`);
   }
-  selector.value = [...selector.options].some(option => option.value === value) ? value : 'all';
+  const combined = combinedDrills[drill];
+  return combined ? t(...combined.label) : drillName(drill);
+}
+
+function renderDirectory() {
+  const directory = $('practice-drills');
+  if (level === 'beyond') { directory.replaceChildren(); return; }
+  const link = (drill, style = '') => {
+    const anchor = element('a', undefined, `drill-link ${style}`.trim());
+    anchor.href = `#practice/${level}/${drill}/train`;
+    anchor.append(element('span', drillTitle(drill)));
+    return anchor;
+  };
+  directory.replaceChildren(link('all', 'drill-mix'), ...directoryGroups().map(({ key, choices }) => {
+    const section = element('section', undefined, 'panel drill-group');
+    section.append(element('h2', t(...groupCopy[key])), ...choices.map(drill => link(drill)));
+    return section;
+  }));
+}
+
+function mountControl(id, destination) {
+  const control = $(id);
+  if (control.parentElement !== destination) destination.append(control);
 }
 
 function trainerRoute(stage) {
   if (view === 'learn') return `#learn/${studyStyle}`;
-  if (view === 'assistant') return '#assistant';
-  const skill = level === 'beyond' ? 'all' : $('skill').value || 'all';
-  return ['#practice', level, skill, mode, stage].filter(Boolean).join('/');
+  if (view !== 'practice') return `#${view}`;
+  if (!selectedDrill) return `#practice/${level}`;
+  return ['#practice', level, selectedDrill, mode, stage].filter(Boolean).join('/');
 }
 
 function navigateTrainer(stage, replace = false) {
   const route = trainerRoute(stage);
   if (route === location.hash) return;
-  const state = stage ? { trainerRound: true } : null;
+  const state = { trainerParent: replace ? history.state?.trainerParent : location.hash, trainerRound: Boolean(stage) };
   if (replace) history.replaceState(state, '', route);
   else history.pushState(state, '', route);
 }
@@ -182,19 +201,23 @@ function readTrainerRoute() {
   clearInterval(timer);
   run = null;
   $('trial-review').open = false;
-  view = section === 'assistant' || section === 'practice' ? section : 'learn';
+  view = ['learn', 'practice', 'assistant', 'settings'].includes(section) ? section : 'home';
   if (view === 'practice') {
     level = nextLevel === 'advanced' || nextLevel === 'beyond' ? nextLevel : 'basic';
     mode = nextMode === 'trial' ? 'trial' : 'train';
-    if (level !== 'beyond') fillSkills(skill);
+    const known = level !== 'beyond' && (skill === 'all' || directoryGroups().some(group => group.choices.includes(skill)));
+    selectedDrill = known ? skill : '';
   } else if (view === 'learn') {
     studyStyle = nextLevel === 'grid' ? 'grid' : 'flip';
+  } else if (view === 'settings') {
+    settingsBack = history.state?.trainerParent || '#home';
   }
   navigateTrainer(null, true);
   renderSetup();
-  if (leftRound && view === 'practice') {
+  window.scrollTo(0, 0);
+  if (leftRound && view === 'practice' && selectedDrill) {
     if (roundEndMessage) $('practice-status').textContent = roundEndMessage;
-    $('skill').focus();
+    $('practice-drill-title').focus();
   }
   roundEndMessage = '';
 }
@@ -202,21 +225,18 @@ function readTrainerRoute() {
 function renderSetup() {
   const beyond = level === 'beyond';
   const trial = mode === 'trial';
-  const inSession = run && !run.finished;
-  for (const button of all('[data-view]')) {
-    const active = button.dataset.view === view;
-    $(button.dataset.view).hidden = !active;
-    if (active) button.setAttribute('aria-current', 'page');
-    else button.removeAttribute('aria-current');
-    button.disabled = Boolean(inSession);
-  }
-  $('trainer-settings').hidden = view === 'assistant' || (view === 'practice' && Boolean(run || beyond));
-  $('range-field').hidden = view === 'practice' && level !== 'basic';
-  $('practice-setup').hidden = Boolean(run);
+  const practice = view === 'practice';
+  const configuring = practice && selectedDrill && !run;
+  for (const screen of ['home', 'learn', 'practice', 'assistant', 'settings']) $(screen).hidden = view !== screen;
+  $('trainer-back').hidden = view === 'home' || Boolean(practice && run);
+  $('trainer-back').href = view === 'settings' ? settingsBack : configuring ? `#practice/${level}` : '#home';
+  $('settings-link').hidden = view === 'settings' || Boolean(practice && run);
+  mountControl('stack-control', view === 'learn' ? $('learn-stack') : configuring ? $('practice-stack') : $('settings-stack'));
+  mountControl('range-field', configuring && level === 'basic' ? $('practice-range') : $('learn-range'));
+  $('practice-directory').hidden = Boolean(selectedDrill || run);
+  $('practice-setup').hidden = !configuring;
   $('practice-session').hidden = !run || run.finished;
   $('trial-results').hidden = !run?.finished;
-  $('language').disabled = Boolean(inSession);
-  $('practice-form').hidden = beyond;
   $('beyond').hidden = !beyond;
   for (const button of all('[data-level]')) button.setAttribute('aria-pressed', button.dataset.level === level);
   for (const button of all('[data-mode]')) button.setAttribute('aria-pressed', button.dataset.mode === mode);
@@ -224,7 +244,15 @@ function renderSetup() {
   $('trial-count-field').hidden = !trial;
   $('order-field').hidden = trial;
   $('focus-field').hidden = trial;
-  if (!beyond) {
+  if (practice && !selectedDrill) renderDirectory();
+  if (configuring) {
+    $('practice-drill-title').textContent = drillTitle(selectedDrill);
+    $('drill-description').textContent = selectedDrill === 'all'
+      ? t('Luyện xen kẽ các bài của cấp này trong cùng một lượt.', 'Practice drills from this level together in one session.')
+      : t(...(selectedDrill.startsWith('group:') ? groupDetails[selectedDrill.slice(6)] : drillDetails[selectedDrill]));
+    $('practice-mode-description').textContent = trial
+      ? t('Làm đủ số câu đã chọn. Xem điểm và thời gian khi kết thúc.', 'Complete the selected number of questions and see your score and time at the end.')
+      : t('Xem đáp án sau từng câu. Có thể dừng bất cứ lúc nào.', 'See the answer after each question. Stop whenever you like.');
     const skills = currentSkills();
     const restackOnly = skills.every(skill => skill === 'restack');
     $('answer-mode-field').hidden = trial && restackOnly;
@@ -249,7 +277,6 @@ function applyLanguage() {
     else item.node.textContent = item[lang];
   }
   fillStacks(selectedStack?.id ?? readLocal(activeStackKey, 'mnemonica'));
-  if (level !== 'beyond') fillSkills($('skill').value);
   if (run?.finished) renderResults();
   else renderSetup();
 }
@@ -289,6 +316,7 @@ function newRound(event) {
   navigateTrainer('session');
   renderSetup();
   showQuestion();
+  window.scrollTo(0, 0);
   if (trial) { tick(); timer = setInterval(tick, 200); }
 }
 
@@ -578,25 +606,29 @@ $('language').addEventListener('click', () => {
 });
 
 window.addEventListener('hashchange', readTrainerRoute);
-for (const button of all('[data-view]')) button.addEventListener('click', () => {
-  view = button.dataset.view;
-  if (run) {
-    clearInterval(timer);
-    run = null;
-    $('trial-review').open = false;
+document.addEventListener('click', event => {
+  const link = event.target.closest('a[href^="#"]');
+  if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const route = link.hash;
+  if (route === location.hash) return;
+  if (link.id === 'trainer-back') {
+    if (history.state?.trainerParent === route) { history.back(); return; }
+    history.replaceState(null, '', route);
+  } else {
+    history.pushState({ trainerParent: location.hash }, '', route);
   }
-  navigateTrainer();
-  renderSetup();
+  readTrainerRoute();
 });
 for (const button of all('[data-level]')) button.addEventListener('click', () => {
   level = button.dataset.level;
-  if (level !== 'beyond') fillSkills();
-  navigateTrainer();
+  selectedDrill = '';
+  navigateTrainer(null, true);
   renderSetup();
 });
 for (const button of all('[data-mode]')) button.addEventListener('click', () => {
   mode = button.dataset.mode;
-  navigateTrainer();
+  navigateTrainer(null, true);
   renderSetup();
 });
 for (const button of all('[data-learn]')) button.addEventListener('click', () => {
@@ -637,7 +669,6 @@ $('flip-side').addEventListener('change', () => { flipped = false; renderStudy()
 $('flip-card').addEventListener('click', () => { flipped = !flipped; renderStudy(); });
 $('flip-prev').addEventListener('click', () => { studyIndex--; flipped = false; renderStudy(); });
 $('flip-next').addEventListener('click', () => { studyIndex++; flipped = false; renderStudy(); });
-$('skill').addEventListener('change', () => { navigateTrainer(); renderSetup(); });
 $('practice-focus').addEventListener('change', renderSetup);
 $('practice-form').addEventListener('submit', newRound);
 $('answer-form').addEventListener('submit', event => {

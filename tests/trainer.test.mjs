@@ -41,7 +41,11 @@ test('all 52 cut states produce the right ACAAN and relative positions on every 
         assert.equal(afterCut[wanted - 1], card);
         const cutCard = buildQuestion(model, 'cut-card', index, variant);
         assert.deepEqual(cutCard?.answer ?? null, amount ? [afterCut.at(-1)] : null);
-        assert.equal(buildQuestion(model, 'relative-position', index, variant).answer[0], rotated.indexOf(card) + 1);
+        const position = rotated.indexOf(card) + 1;
+        assert.equal(buildQuestion(model, 'relative-position', index, variant)?.answer[0] ?? null, position === 52 ? null : position);
+        const relativeCard = buildQuestion(model, 'relative-card', index, variant);
+        const afterKnownBottom = cards.slice(variant + 1).concat(cards.slice(0, variant + 1));
+        assert.equal(relativeCard?.answer[0] ?? null, index === 51 ? null : afterKnownBottom[index]);
       }
     }
   }

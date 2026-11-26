@@ -154,7 +154,7 @@ function fillSkills(value = 'all') {
     }
     if (skills.length > 1) {
       const mix = new Option(t(`Trộn ${name}`, `Mix ${name}`), `group:${key}`);
-      group.insertBefore(mix, key === 'relative' ? null : group.firstChild);
+      group.insertBefore(mix, key === 'bottom' ? null : group.firstChild);
     }
     selector.append(group);
   }

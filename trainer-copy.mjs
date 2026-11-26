@@ -18,7 +18,8 @@ export const drillCopy = {
   'backward-distance': ['Khoảng cách ngược', 'Backward Distance', 'Đi ngược theo vòng stack, từ {0} đến {1} cách mấy vị trí?', 'Going backward around the stack, how many positions from {0} to {1}?'],
   'forward-offset': ['Lá cách X vị trí phía sau', 'Forward Offset', 'Đi xuôi {1} vị trí từ {0} theo vòng stack. Đến lá nào?', 'Go {1} positions forward from {0} around the stack. Which card do you reach?'],
   'backward-offset': ['Lá cách X vị trí phía trước', 'Backward Offset', 'Đi ngược {1} vị trí từ {0} theo vòng stack. Đến lá nào?', 'Go {1} positions backward from {0} around the stack. Which card do you reach?'],
-  'relative-position': ['Vị trí sau khi cắt', 'Relative Position', 'Đáy hiện tại là {0}. {1} ở vị trí nào tính từ trên?', 'The current bottom card is {0}. Where is {1}, counting from the top?'],
+  'relative-position': ['Lá → vị trí sau khi cắt', 'Card to Position After a Cut', 'Đáy hiện tại là {0}. {1} ở vị trí nào tính từ trên?', 'The current bottom card is {0}. Where is {1}, counting from the top?'],
+  'relative-card': ['Vị trí → lá sau khi cắt', 'Position to Card After a Cut', 'Đáy hiện tại là {0}. Lá nào ở vị trí {1} tính từ trên?', 'The current bottom card is {0}. Which card is at position {1} from the top?'],
   'bottom-position': ['Vị trí tính từ đáy', 'Bottom Position', 'Tính từ đáy stack, {0} là lá thứ mấy?', 'Counting from the bottom of the stack, where is {0}?'],
   'bottom-card': ['Lá tính từ đáy', 'Bottom Card', 'Lá thứ {0} tính từ đáy stack là lá nào?', 'Which card is at position {0} from the bottom?'],
   'single-missing': ['Thiếu một lá', 'Single Missing', 'Thiếu lá nào?', 'Which card is missing?'],
@@ -28,5 +29,6 @@ export const drillCopy = {
 
 export const groupCopy = {
   position: ['Vị trí', 'Position'], neighbour: ['Lá liền kề', 'Neighbour'], acaan: ['ACAAN', 'ACAAN'], quartet: ['Tứ quý', 'Quartet'],
-  mate: ['Mate', 'Mate'], distance: ['Khoảng cách', 'Distance'], relative: ['Vị trí tương đối', 'Relative Position'], missing: ['Lá bị thiếu', 'Missing Card'],
+  mate: ['Mate', 'Mate'], distance: ['Khoảng cách', 'Distance'], bottom: ['Đếm từ đáy', 'Bottom Count'],
+  relative: ['Vị trí sau khi cắt', 'Relative Position'], missing: ['Lá bị thiếu', 'Missing Card'],
 };

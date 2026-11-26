@@ -2,7 +2,8 @@ import { cardCode, deckLength as size, cardLabel } from './stack-library.mjs';
 
 export const basic = ['card-position', 'position-card', 'previous', 'next'];
 export const advanced = {
-  relative: ['bottom-card', 'relative-position', 'bottom-position'],
+  bottom: ['bottom-card', 'bottom-position'],
+  relative: ['relative-position', 'relative-card'],
   acaan: ['cut-count', 'cut-card'],
   quartet: ['quartet-positions', 'quartet-order', 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank'],
   mate: ['mate-position', 'mate-distance', 'relative-mate'],
@@ -95,7 +96,13 @@ export function buildQuestion(model, skill, index, variant = 0, random = Math.ra
     case 'backward-distance': return ask([face, cardLabel(other)], forwardDistance(otherIndex, index), [card, other]);
     case 'forward-offset': return ask([face, variant + 1], other, [card, other]);
     case 'backward-offset': return ask([face, variant + 1], at(index - variant - 1), [card, at(index - variant - 1)]);
-    case 'relative-position': return ask([cardLabel(bottom), face], positionAfterCut(index, cut), [card, bottom]);
+    case 'relative-position': return index === otherIndex ? null : ask([cardLabel(bottom), face], positionAfterCut(index, cut), [card, bottom]);
+    case 'relative-card': {
+      if (fromTop === size) return null;
+      const currentBottom = at(variant);
+      const target = at(variant + fromTop);
+      return ask([cardLabel(currentBottom), fromTop], target, [target, currentBottom]);
+    }
     case 'bottom-position': return ask([face], fromBottom);
     case 'bottom-card': return ask([fromBottom], card);
     case 'restack':
@@ -136,7 +143,7 @@ function shuffledCards(cards, random) {
 
 const rankOnly = new Set(['quartet-positions', 'quartet-order']);
 const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card']);
-const fullVariants = new Set(['cut-count', 'cut-card']);
+const fullVariants = new Set(['cut-count', 'cut-card', 'relative-card']);
 const segmentSkills = new Set(advanced.missing);
 
 export function questionSet(model, skills, { start = 1, end = size, random = Math.random, sequential = false, eligible = () => true } = {}) {
@@ -216,14 +223,14 @@ export function answerChoices(prompt, cards, { start = 1, end = size } = {}, ran
       if (numeric) {
         const min = kind === 'cut-count' ? 0 : kind === 'relative-quartet' ? 2 : 1;
         const max = kind === 'quartet-distances' ? size - 1 - answer.reduce((sum, value, j) => sum + (i === j ? 0 : value), 0)
-          : ['cut-count', 'forward-distance', 'backward-distance'].includes(kind) ? size - 1 : size;
+          : ['cut-count', 'forward-distance', 'backward-distance', 'relative-position'].includes(kind) ? size - 1 : size;
         alternatives = kind === 'card-position' && end - start >= 2 ? positions.slice(start - 1, end)
           : Array.from({ length: max - min + 1 }, (_, index) => min + index);
       } else {
         alternatives = basic.includes(kind) && end - start >= 2 ? cards.slice(start - 1, end) : cards;
         if (kind === 'next-rank' || kind === 'previous-rank') {
           alternatives = alternatives.filter(value => rank(value) === rank(answer[0]) && cardLabel(value) !== prompt.args[0]);
-        } else if ((kind === 'next' || kind === 'previous') && alternatives.length > 3) {
+        } else if (['next', 'previous', 'relative-card'].includes(kind) && alternatives.length > 3) {
           alternatives = alternatives.filter(value => cardLabel(value) !== prompt.args[0]);
         }
       }

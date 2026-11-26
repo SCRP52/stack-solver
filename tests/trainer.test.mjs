@@ -107,15 +107,18 @@ test('every supported drill generates distinct prompts and grades the generated 
   }
 });
 
-test('Missing Card hides the range while the visible cards identify one unique segment', () => {
+test('Missing Card hides the range and supports segments from 5 to 26 cards', () => {
   const { cards } = presets[4];
   const model = stackModel(cards);
   const pool = questionSet(model, advanced.missing, { random: () => 0.99 });
   const givenCards = new Set();
-  assert.equal(pool.length, 46 * (5 + 10));
-  const segments = Array.from({ length: 46 }, (_, start) => cards.slice(start, start + 7));
+  const lengths = new Set();
+  assert.equal(pool.length, 2 * 825);
   for (const { args, shown, answer } of pool) {
     assert.deepEqual(args, [answer.length]);
+    const length = shown.length + answer.length;
+    lengths.add(length);
+    const segments = Array.from({ length: 53 - length }, (_, start) => cards.slice(start, start + length));
     const compatible = segments.filter(segment => shown.every(card => segment.includes(card)));
     assert.equal(compatible.length, 1);
     const [segment] = compatible;
@@ -124,6 +127,7 @@ test('Missing Card hides the range while the visible cards identify one unique s
     assert.notDeepEqual(shown, segment.filter(card => !answer.includes(card)));
     givenCards.add([...shown].sort().join(' '));
   }
+  assert.deepEqual([...lengths].sort((a, b) => a - b), Array.from({ length: 22 }, (_, i) => i + 5));
   assert.equal(givenCards.size, pool.length);
   const q = buildQuestion(model, 'multiple-missing', 51, 6);
   assert.equal(grade(q, q.answer.slice().reverse()), true);

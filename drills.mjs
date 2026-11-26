@@ -15,9 +15,8 @@ const rank = card => card.slice(0, -1);
 const suit = card => card.at(-1);
 const mateSuit = { S: 'C', C: 'S', H: 'D', D: 'H' };
 const positions = Array.from({ length: size }, (_, index) => index + 1);
-const segmentSize = 7;
-const missingPairs = Array.from({ length: segmentSize }, (_, left) =>
-  Array.from({ length: segmentSize - left - 1 }, (_, gap) => [left, left + gap + 1])).flat();
+const minSegmentSize = 5;
+const maxSegmentSize = 26;
 
 export function stackModel(cards) {
   if (cards.length !== size || new Set(cards).size !== size || cards.some(card => cardCode(card) !== card)) {
@@ -101,13 +100,18 @@ export function buildQuestion(model, skill, index, variant = 0, random = Math.ra
     case 'bottom-card': return ask([fromBottom], card);
     case 'single-missing':
     case 'multiple-missing': {
+      const segmentSize = minSegmentSize + variant;
       const start = Math.min(index, size - segmentSize);
       const segment = cards.slice(start, start + segmentSize);
-      const gaps = skill === 'single-missing' ? [variant] : missingPairs[variant];
+      const interiorSize = segmentSize - 2;
+      const first = 1 + Math.floor(random() * interiorSize);
+      const gaps = [first];
+      if (skill === 'multiple-missing') {
+        const second = 1 + Math.floor(random() * (interiorSize - 1));
+        gaps.push(second >= first ? second + 1 : second);
+      }
       const missing = gaps.map(i => segment[i]);
       const visible = segment.filter((_, i) => !gaps.includes(i));
-      // Keep both ends in the shuffled cards so the player can identify the segment.
-      if (visible[0] !== segment[0] || visible.at(-1) !== segment.at(-1)) return null;
       const shown = shuffle([...visible], random);
       if (shown.every((card, i) => card === visible[i])) shown.push(shown.shift());
       return ask([missing.length], missing, missing, { unordered: true, shown });
@@ -127,13 +131,13 @@ function shuffle(items, random) {
 const rankOnly = new Set(['quartet-positions', 'quartet-order']);
 const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card']);
 const fullVariants = new Set(['cut-count', 'cut-card']);
-const missingVariants = { 'single-missing': segmentSize, 'multiple-missing': missingPairs.length };
 
 export function questionSet(model, skills, { start = 1, end = size, random = Math.random, sequential = false, eligible = () => true } = {}) {
   const unique = new Set();
   const buckets = skills.map(skill => {
     const seenRanks = new Set();
-    const variants = fixed.has(skill) ? 1 : fullVariants.has(skill) ? size : missingVariants[skill] ?? size - 1;
+    const isMissing = advanced.missing.includes(skill);
+    const standardVariants = fixed.has(skill) ? 1 : fullVariants.has(skill) ? size : size - 1;
     const items = [];
     for (let index = start - 1; index < end; index++) {
       if (start !== 1 || end !== size) {
@@ -144,10 +148,11 @@ export function questionSet(model, skills, { start = 1, end = size, random = Mat
         if (seenRanks.has(key)) continue;
         seenRanks.add(key);
       }
+      const variants = isMissing ? Math.min(maxSegmentSize, end - index) - minSegmentSize + 1 : standardVariants;
       for (let variant = 0; variant < variants; variant++) {
         const prompt = buildQuestion(model, skill, index, variant, random);
         if (!prompt || !eligible(prompt)) continue;
-        const shown = missingVariants[skill] ? [...prompt.shown].sort() : prompt.shown;
+        const shown = isMissing ? [...prompt.shown].sort() : prompt.shown;
         const key = JSON.stringify([prompt.kind, prompt.args, shown]);
         if (unique.has(key)) continue;
         unique.add(key);

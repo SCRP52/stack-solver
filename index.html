@@ -27,8 +27,8 @@
           <option value="ndo">NDO US · USPCC</option>
           <option value="custom">Nhập thứ tự khác</option>
         </select>
-        <p id="start-example" class="hint">A♥–K♥ · A♣–K♣ · K♦–A♦ · K♠–A♠</p>
-        <textarea id="start-custom" data-lock rows="3" hidden aria-label="Nhập 52 lá xuất phát" placeholder="AS 2S 3S …"></textarea>
+        <textarea id="start-preview" class="start-order" rows="5" readonly aria-label="52 lá xuất phát từ đầu bộ xuống"></textarea>
+        <textarea id="start-custom" class="start-order" data-lock rows="4" hidden aria-label="Nhập 52 lá xuất phát" placeholder="AS 2S 3S …"></textarea>
         <label for="target-mode">Kiểu đích</label>
         <select id="target-mode" data-lock>
           <option value="full">Cả bộ 52 lá</option>
@@ -59,13 +59,23 @@
             <label><input type="checkbox" id="in" data-lock checked> Faro in</label>
             <label><input type="checkbox" id="near" data-lock checked> Faro lệch</label>
             <label><input type="checkbox" id="cut" data-lock checked> Cut</label>
-            <label><input type="checkbox" id="multi-cut-overhand" data-lock> Multi Cut overhand</label>
-            <label><input type="checkbox" id="multi-cut-reorder" data-lock> Multi Cut gom tự do</label>
             <label><input type="checkbox" id="run" data-lock checked> Run</label>
             <label><input type="checkbox" id="reverse" data-lock checked> Đảo đoạn đầu</label>
             <label><input type="checkbox" id="cull" data-lock checked> Cull</label>
             <label><input type="checkbox" id="reverse-cull" data-lock checked> Reverse cull</label>
             <label><input type="checkbox" id="deal" data-lock> Chia và gom tụ</label>
+          </div>
+          <div class="options" role="group" aria-label="Cắt nhiều cọc">
+            <label><input type="checkbox" id="multi-cut" data-lock> Cắt nhiều cọc</label>
+            <label><input type="checkbox" id="multi-cut-reorder" data-lock disabled> Đổi thứ tự cọc</label>
+          </div>
+          <div id="multi-cut-settings" hidden>
+            <label for="multi-cut-max">Số cọc cắt tối đa</label>
+            <select id="multi-cut-max" data-lock aria-describedby="multi-cut-help">
+              <option value="3">3 cọc</option><option value="4">4 cọc</option><option value="5">5 cọc</option><option value="6">6 cọc</option>
+              <option value="7">7 cọc</option><option value="8">8 cọc</option><option value="9">9 cọc</option><option value="10" selected>10 cọc</option>
+            </select>
+            <p class="hint" id="multi-cut-help">Mặc định đặt cọc mới lên trên cọc vừa lấy. Bật ô bên cạnh để cho phép đổi thứ tự lúc gom. Solver sẽ ghi cắt sau lá nào.</p>
           </div>
           <p class="hint">Cull lấy tối đa 5 lá rải rác rồi nạp theo chiều xòe, ưu tiên từ dưới lên. Reverse cull bắt đầu từ đúng lá đáy. Giữa hai lượt cull cần có một nước khác.</p>
           <div class="fields">
@@ -80,9 +90,6 @@
             <label><input type="checkbox" id="cull-deeper" data-lock checked> Cho cull nạp vào giữa bộ</label>
           </div>
           <p class="hint">Chia theo vòng, đặt mỗi lá lên trên tụ đang chia. Gom tự do cho phép đổi thứ tự các tụ. Kết quả sẽ ghi thứ tự gom cụ thể. Tối đa 10 tụ.</p>
-          <label for="multi-cut-splits">Mốc cắt Multi Cut</label>
-          <input id="multi-cut-splits" data-lock value="13,26,39" type="text" aria-describedby="multi-cut-help">
-          <p class="hint" id="multi-cut-help">Nhập từ 2 đến 9 mốc, cách nhau bằng dấu phẩy. Hai kiểu đều cắt 3–10 cọc liền. Overhand đặt từng cọc lên trên cọc vừa lấy. Gom tự do xếp các cọc theo thứ tự solver tìm được.</p>
           <p class="hint">Run rút từng lá rồi đặt phần còn lại lên trên tụ run. Mỗi thao tác tính một nước.</p>
         </details>
         <p id="error" class="error" role="alert" hidden></p>

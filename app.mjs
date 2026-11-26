@@ -5,10 +5,10 @@ const $ = id => document.getElementById(id);
 const storageKey = 'stack-solver-history-v1';
 const suits = { S: '♠', D: '♦', C: '♣', H: '♥' };
 const families = ['out', 'in', 'near', 'cut', 'run', 'reverse', 'cull', 'deal'];
-const extraFamilies = [['reverse-cull', 'reverseCull'], ['multi-cut-overhand', 'multiCutOverhand'], ['multi-cut-reorder', 'multiCutReorder']];
+const extraFamilies = [['reverse-cull', 'reverseCull'], ['multi-cut', 'multiCut']];
 const switches = [['cull-deeper', 'cullDeeper'], ...extraFamilies];
 const numeric = [['faro-window', 'faroWindow', 1, 25], ['run-max', 'runMax', 2, 52],
-  ['cull-max', 'cullMax', 1, 5], ['deal-max', 'dealMax', 2, 10]];
+  ['cull-max', 'cullMax', 1, 5], ['deal-max', 'dealMax', 2, 10], ['multi-cut-max', 'multiCutMax', 3, 10]];
 let worker;
 let session;
 let currentStep = 0;
@@ -61,12 +61,8 @@ function updateTargetMode() {
 function updateStart() {
   const preset = getPreset($('start').value);
   $('start-custom').hidden = Boolean(preset);
-  $('start-example').hidden = !preset;
-  if (!preset) return;
-  const { cards } = preset;
-  $('start-example').textContent = preset.category === 'Bộ mới'
-    ? [0, 13, 26, 39].map(i => `${cardText(cards[i])}–${cardText(cards[i + 12])}`).join(' · ')
-    : `Lá đầu ${cardText(cards[0])} · lá thứ 26 ${cardText(cards[25])} · lá đáy ${cardText(cards[51])}`;
+  $('start-preview').hidden = !preset;
+  $('start-preview').value = preset?.cards.join(' ') ?? '';
 }
 
 function loadCards(cards, name) {
@@ -96,15 +92,32 @@ function installPresetOptions() {
 
 function setLocked(locked) {
   $('solver-form').querySelectorAll('[data-lock]').forEach(control => { control.disabled = locked; });
+  updateMultiCut();
   $('solve').hidden = locked;
   $('stop').hidden = !locked;
+}
+
+function updateMultiCut() {
+  const toggle = $('multi-cut');
+  $('multi-cut-reorder').disabled = toggle.disabled || !toggle.checked;
+  $('multi-cut-settings').hidden = !toggle.checked;
 }
 
 const isCull = step => step?.kind === 'cull' || step?.kind === 'reverse-cull';
 const cullDirection = step => step.params.direction ?? (step.kind === 'reverse-cull' ? 'up' : 'down');
 const cullCount = steps => steps.filter(isCull).length;
 
-function moveName(step) {
+function cutCards(splits, before) {
+  return splits.map(slot => `${cardText(before[slot - 1])} (#${slot})`).join(', ');
+}
+
+function moveName(step, before) {
+  if (step.kind === 'multi-cut') {
+    const { splits, order, stacked, overhand } = step.params;
+    const name = (stacked ?? overhand) ? 'Cắt chồng' : 'Cắt';
+    return `${name} ${order.length} cọc · sau ${cutCards(splits, before)} · gom ${order.join('–')}`;
+  }
+  if (step.kind === 'triple') return `Cắt 3 cọc · sau ${cutCards([step.params.a, step.params.b], before)} · gom ${step.params.order}`;
   if (!isCull(step)) return step.label;
   const name = step.kind === 'reverse-cull' ? 'Reverse cull' : `Cull ${step.cards.length}`;
   const direction = cullDirection(step);
@@ -116,17 +129,17 @@ function cardText(card) {
   return card.slice(0, -1) + suits[card.at(-1)];
 }
 
-function instructions(step) {
+function instructions(step, before) {
   if (!step) return 'Thứ tự trước khi bắt đầu. Đọc từ trái sang phải, rồi xuống dòng.';
   const p = step.params;
   if (isCull(step)) return `Xòe từ ${cullDirection(step) === 'up' ? 'dưới lên' : 'trên xuống'}. Số vị trí đếm từ đầu bộ lúc chưa cull.`;
   if (step.kind === 'cut') return `Chuyển ${p.n} lá đầu xuống cuối bộ.`;
   if (step.kind === 'run') return `Run ${p.n} lá đầu, rồi đặt phần còn lại lên trên tụ vừa run.`;
   if (step.kind === 'reverse') return `Run ${p.n} lá đầu để đảo thứ tự, rồi đặt phần còn lại xuống dưới tụ vừa run.`;
-  if (step.kind === 'triple') return `Cắt sau lá ${p.a} và ${p.b}, rồi gom ba cọc theo thứ tự ${p.order}.`;
+  if (step.kind === 'triple') return `Cắt sau ${cutCards([p.a, p.b], before)}, rồi gom ba cọc theo thứ tự ${p.order}.`;
   if (step.kind === 'multi-cut') {
-    const cut = `Cắt sau các lá ${p.splits.join(', ')}. Đánh số cọc theo thứ tự từ đầu bộ.`;
-    const method = p.overhand ? ' Đặt từng cọc vừa lấy lên trên cọc trước, kể cả cọc cuối.' : '';
+    const cut = `Cắt sau ${cutCards(p.splits, before)}. Đánh số cọc từ đầu bộ xuống.`;
+    const method = (p.stacked ?? p.overhand) ? ' Đặt từng cọc vừa lấy lên trên cọc trước, kể cả cọc cuối.' : '';
     return `${cut}${method} Thứ tự từ trên xuống sau khi gom là ${p.order.join(' → ')}.`;
   }
   if (step.kind === 'deal') return `Chia lần lượt từ tụ 1 tới tụ ${p.count} rồi lặp lại. Gom theo thứ tự từ đầu bộ xuống: ${p.order.join(' → ')}.`;
@@ -157,9 +170,10 @@ function showStep(number) {
   const steps = session.routes?.[currentRoute] ?? session.steps;
   currentStep = number;
   const step = steps[number - 1];
+  const before = steps[number - 2]?.deck ?? session.startCards;
   $('step-number').textContent = number ? `Nước ${number}/${steps.length}` : 'Bộ xuất phát';
-  $('step-detail').textContent = instructions(step);
-  const events = cullDescriptions(step, steps[number - 2]?.deck ?? session.startCards);
+  $('step-detail').textContent = instructions(step, before);
+  const events = cullDescriptions(step, before);
   $('cull-events').hidden = !events.length;
   $('cull-events').replaceChildren(...events.map(description => {
     const item = document.createElement('li');
@@ -203,7 +217,7 @@ function renderSolution() {
     const number = document.createElement('span');
     number.className = 'number';
     number.textContent = index + 1;
-    button.append(number, document.createTextNode(moveName(step)));
+    button.append(number, document.createTextNode(moveName(step, steps[index - 1]?.deck ?? session.startCards)));
     button.addEventListener('click', () => {
       showStep(index + 1);
       $('study').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -282,11 +296,12 @@ function restore(entry) {
   } else loadCards(entry.targetCards, entry.name);
   for (const family of families) $(family).checked = entry.options[family];
   for (const [id, key] of switches) $(id).checked = entry.options[key] ?? false;
+  $('multi-cut').checked = entry.options.multiCut ?? Boolean(entry.options.multiCutOverhand || entry.options.multiCutReorder || entry.options.triple);
   $('multi-cut-reorder').checked = entry.options.multiCutReorder ?? entry.options.triple ?? false;
   for (const [id, key] of [...numeric, ['deal-order', 'dealOrder']]) {
     $(id).value = entry.options[key] ?? defaults[key];
   }
-  $('multi-cut-splits').value = entry.options.multiCutSplits ?? entry.options.tripleSplits ?? defaults.multiCutSplits;
+  updateMultiCut();
   currentStep = 0;
   currentRoute = 0;
   $('progress-block').hidden = true;
@@ -344,7 +359,7 @@ $('solver-form').addEventListener('submit', event => {
       if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Giá trị cho phép từ ${min} đến ${max}.`);
       options[key] = value;
     }
-    options.multiCutSplits = $('multi-cut-splits').value;
+    options.multiCutReorder = options.multiCut && $('multi-cut-reorder').checked;
     options.dealOrder = $('deal-order').value;
     if (!families.some(family => options[family]) && !extraFamilies.some(([, key]) => options[key])) {
       throw new Error('Bật ít nhất một loại nước đi.');
@@ -403,6 +418,7 @@ $('target').addEventListener('input', () => { $('target-preset').value = ''; upd
 $('target-mode').addEventListener('change', updateTargetMode);
 $('target-positions').addEventListener('input', () => showError());
 $('start').addEventListener('change', updateStart);
+$('multi-cut').addEventListener('change', updateMultiCut);
 $('target-preset').addEventListener('change', () => {
   const preset = getPreset($('target-preset').value);
   if (preset) loadCards(preset.cards, preset.label);
@@ -432,7 +448,7 @@ $('copy').addEventListener('click', async () => {
   try {
     const steps = session.routes?.[currentRoute] ?? session.steps;
     const lines = steps.map((step, index) => [
-      `${index + 1}. ${moveName(step)}`,
+      `${index + 1}. ${moveName(step, steps[index - 1]?.deck ?? session.startCards)}`,
       ...cullDescriptions(step, steps[index - 1]?.deck ?? session.startCards),
     ].join('\n'));
     await navigator.clipboard.writeText(lines.join('\n'));
@@ -445,6 +461,7 @@ $('history-count').textContent = readHistory().length;
 installPresetOptions();
 updateStart();
 updateTargetMode();
+updateMultiCut();
 updateCount();
 
 if ('serviceWorker' in navigator && window.isSecureContext) {

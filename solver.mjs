@@ -11,9 +11,9 @@ const index = letter => letter.charCodeAt(0) - base;
 const suits = { '♠': 'S', '♦': 'D', '♣': 'C', '♥': 'H' };
 
 export const defaults = {
-  out: true, in: true, near: true, cut: true, multiCutOverhand: false, multiCutReorder: false, run: true, cull: true,
+  out: true, in: true, near: true, cut: true, multiCut: false, multiCutReorder: false, run: true, cull: true,
   reverse: true, deal: false, dealMax: 10, dealOrder: 'ordered',
-  faroWindow: 8, runMax: 39, cullMax: 5, cullDeeper: true, reverseCull: true, multiCutSplits: '13,26,39',
+  faroWindow: 8, runMax: 39, cullMax: 5, cullDeeper: true, reverseCull: true, multiCutMax: 10,
 };
 
 export const mnemonica = '4C 2H 7D 3C 4H 6D AS 5H 9S 2S QH 3D QC 8H 6S 5S 9H KC 2D JH 3S 8S 6H 10C 5D KD 2C 3H 8D 5C KS JD 8C 10S KH JC 7S 10H AD 4S 7H 4D AC 9C JS QD 7C QS 10D 6C AH 9D';
@@ -140,19 +140,15 @@ function* allPileOrders(piles, used = []) {
   }
 }
 
-function* cutSplits(marks, max, chosen = [], from = 0) {
-  for (let i = from; i < marks.length; i++) {
-    const splits = [...chosen, marks[i]];
-    if (splits.length >= 2) yield splits;
-    if (splits.length < max) yield* cutSplits(marks, max, splits, i + 1);
-  }
-}
+const threePileOrders = [...allPileOrders([1, 2, 3])];
+const blockCutSplits = [[13, 26], [13, 39], [26, 39], [13, 26, 39]];
 
-function makeMultiCutMove(splits, order, overhand = false) {
+function makeMultiCutMove(splits, order, stacked = false) {
   const boundaries = [0, ...splits, size];
   const map = order.flatMap(pile => positions.slice(boundaries[pile - 1], boundaries[pile]));
-  const label = `Multi Cut ${overhand ? 'overhand' : 'gom tự do'} · ${splits.length + 1} cọc · ${splits.join(', ')} → ${order.join('–')}`;
-  return moveFromMap('multi-cut', label, map, { splits, order, overhand });
+  const params = { splits, order, stacked };
+  const label = `${stacked ? 'Cắt chồng' : 'Cắt'} ${order.length} cọc · ${splits.join(', ')} → ${order.join('–')}`;
+  return moveFromMap('multi-cut', label, map, params);
 }
 
 function* cyclicPileOrders(count) {
@@ -254,25 +250,22 @@ export function makeMoves(options = defaults) {
     }
   }
   let wideMultiCut = null;
-  if (config.multiCutOverhand || config.multiCutReorder) {
-    const raw = config.multiCutSplits.trim().split(/[\s,]+/);
-    if (raw.some(value => !/^\d+$/.test(value) || +value < 1 || +value >= size)) {
-      throw new Error('Mốc Multi Cut phải là các số từ 1 đến 51.');
+  const multiCut = options.multiCut ?? Boolean(options.multiCutOverhand || options.multiCutReorder);
+  if (multiCut) {
+    if (!Number.isInteger(config.multiCutMax) || config.multiCutMax < 3 || config.multiCutMax > 10) {
+      throw new Error('Giới hạn cắt phải từ 3 đến 10 cọc.');
     }
-    const marks = [...new Set(raw.map(Number))].sort((a, b) => a - b);
-    if (marks.length < 2 || marks.length > 9) throw new Error('Multi Cut cần từ 2 đến 9 mốc khác nhau.');
-    if (config.multiCutOverhand) {
-      for (const splits of cutSplits(marks, marks.length)) {
-        const order = Array.from({ length: splits.length + 1 }, (_, i) => splits.length + 1 - i);
-        keep(makeMultiCutMove(splits, order, true));
-      }
-    }
-    if (config.multiCutReorder) {
-      for (const splits of cutSplits(marks, 3)) {
-        const piles = Array.from({ length: splits.length + 1 }, (_, i) => i + 1);
+    wideMultiCut = { maxPiles: config.multiCutMax, reorder: config.multiCutReorder, allowRotation: !config.cut };
+    // Keep suit-sized blocks available during the search. Other cut positions
+    // are inferred from the decks or varied dynamically.
+    for (const splits of blockCutSplits) {
+      const count = splits.length + 1;
+      if (count > config.multiCutMax) continue;
+      const piles = Array.from({ length: count }, (_, i) => i + 1);
+      keep(makeMultiCutMove(splits, [...piles].reverse(), true));
+      if (config.multiCutReorder) {
         for (const order of allPileOrders(piles)) keep(makeMultiCutMove(splits, order));
       }
-      if (marks.length > 3) wideMultiCut = marks;
     }
   }
   if (config.deal) {
@@ -396,22 +389,31 @@ function findDirectDeal(start, target, max) {
   return null;
 }
 
-function findDirectMultiCut(start, target, marks) {
-  // Each cọc is an intact run from the source deck. Its first position
-  // therefore tells us where the cut was made and where the cọc was placed.
+function findDirectMultiCut(start, target, { maxPiles, reorder, allowRotation }) {
+  // Each packet is an intact run from the source deck. Its first position
+  // tells us where the cut was made and where the packet was placed.
   const starts = [];
   let previous = -2;
   for (const card of target) {
     const position = start.indexOf(card);
     if (position !== previous + 1) {
-      if (position !== 0 && !marks.includes(position)) return null;
+      if (!reorder && starts.length && position >= starts.at(-1)) return null;
       starts.push(position);
+      if (starts.length > maxPiles) return null;
     }
     previous = position;
   }
-  if (starts.length < 5) return null; // Smaller cuts are already in the move list.
+  if (starts.length < 2) return null;
+  if (starts.length === 2) {
+    if (!reorder || !allowRotation) return null;
+    // A rotation can also be made with three packets when only this move is enabled.
+    if (starts[0] < size - 1) starts.splice(1, 0, starts[0] + 1);
+    else starts.push(1);
+  }
   const boundaries = [...starts].sort((a, b) => a - b);
-  return makeMultiCutMove(boundaries.slice(1), starts.map(position => boundaries.indexOf(position) + 1));
+  const order = starts.map(position => boundaries.indexOf(position) + 1);
+  const stacked = order.every((pile, i) => pile === order.length - i);
+  return makeMultiCutMove(boundaries.slice(1), order, stacked);
 }
 
 function directExpandedMove(start, target, moves, allowCull = true) {
@@ -474,6 +476,62 @@ function completeTarget(state, required) {
   return target.join('');
 }
 
+function findPartialStackedCut(start, required, maxPiles) {
+  const requiredSums = new Int16Array(size).fill(-1);
+  for (const [destination, card] of required) {
+    const source = start.indexOf(card);
+    requiredSums[source] = size + source - destination;
+  }
+  const failed = new Set();
+  function findSplits(from, remaining) {
+    if (!remaining) return from === size ? [] : null;
+    const key = from * (maxPiles + 1) + remaining;
+    if (failed.has(key)) return null;
+    let expected = -1;
+    for (let end = from + 1; end <= size - remaining + 1; end++) {
+      const sum = requiredSums[end - 1];
+      if (sum !== -1) {
+        if (expected !== -1 && expected !== sum) break;
+        expected = sum;
+      }
+      // A packet [from, end) lands at size - end when packets are stacked.
+      if (expected !== -1 && from + end !== expected) continue;
+      const rest = findSplits(end, remaining - 1);
+      if (rest) return end === size ? rest : [end, ...rest];
+    }
+    failed.add(key);
+    return null;
+  }
+  for (let count = 3; count <= maxPiles; count++) {
+    const splits = findSplits(0, count);
+    if (splits) return makeMultiCutMove(splits, Array.from({ length: count }, (_, i) => count - i), true);
+  }
+  return null;
+}
+
+function searchPartialThreePileCuts(start, required, allowRotation, expired, offer, enough) {
+  const orders = threePileOrders.filter(([first, second, third]) =>
+    first !== 1 || second !== 2 || third !== 3).filter(([first, second]) => allowRotation || second !== first % 3 + 1);
+  for (let a = 1; a < size - 1; a++) {
+    for (let b = a + 1; b < size; b++) {
+      if (expired() || enough(1)) return;
+      const boundaries = [0, a, b, size];
+      for (const order of orders) {
+        const fits = required.every(([destination, card]) => {
+          for (const pile of order) {
+            const from = boundaries[pile - 1];
+            const length = boundaries[pile] - from;
+            if (destination < length) return start[from + destination] === card;
+            destination -= length;
+          }
+          return false;
+        });
+        if (fits) offer([makeMultiCutMove([a, b], order, order[0] === 3 && order[1] === 2)]);
+      }
+    }
+  }
+}
+
 function searchPartialShallow(start, required, moves, expired, offer, enough) {
   const expanded = moves.wideCull || moves.wideDeal || moves.wideMultiCut;
   const matches = state => required.every(([slot, card]) => state[slot] === card);
@@ -485,6 +543,11 @@ function searchPartialShallow(start, required, moves, expired, offer, enough) {
     else afterOne.push([state, move]);
   }
   if (expanded) offer([directExpandedMove(start, completeTarget(start, required), moves)]);
+  if (moves.wideMultiCut && !enough(1) && !expired()) {
+    const { maxPiles, reorder, allowRotation } = moves.wideMultiCut;
+    offer([findPartialStackedCut(start, required, maxPiles)]);
+    if (reorder) searchPartialThreePileCuts(start, required, allowRotation, expired, offer, enough);
+  }
   for (const [state, first] of afterOne) {
     if (expired() || enough(2)) return expanded ? 0 : 1;
     for (const last of moves.list) {
@@ -883,16 +946,22 @@ function shuffle(items) {
 function varyMove(state, target, moves, listed) {
   const draw = Math.random();
   if (moves.wideMultiCut && draw < 0.2) {
-    const marks = moves.wideMultiCut;
-    const count = 4 + Math.floor(Math.random() * (marks.length - 3));
-    const splits = shuffle([...marks]).slice(0, count).sort((a, b) => a - b);
+    const { maxPiles, reorder, allowRotation } = moves.wideMultiCut;
+    const count = 2 + Math.floor(Math.random() * (maxPiles - 2));
+    const splits = shuffle(positions.slice(1)).slice(0, count).sort((a, b) => a - b);
     const starts = [0, ...splits];
     const order = starts.map((_, i) => i + 1);
-    if (Math.random() < 0.5) {
+    if (!reorder) order.reverse();
+    else if (Math.random() < 0.5) {
       const firstPosition = pile => target.indexOf(state[starts[pile - 1]]);
       order.sort((a, b) => firstPosition(a) - firstPosition(b));
     } else shuffle(order);
-    return makeMultiCutMove(splits, order) ?? listed[Math.floor(Math.random() * listed.length)];
+    const rotation = order.every((pile, i) => pile === (order[0] + i - 1) % order.length + 1);
+    if (!rotation || allowRotation) {
+      const move = makeMultiCutMove(splits, order, order.every((pile, i) => pile === order.length - i));
+      if (move) return move;
+    }
+    return listed[Math.floor(Math.random() * listed.length)];
   }
   if (moves.wideDeal && draw >= 0.8) {
     const count = 6 + Math.floor(Math.random() * (moves.config.dealMax - 5));

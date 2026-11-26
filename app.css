@@ -24,6 +24,7 @@ p { margin: 0; }
 label { display: block; margin: 15px 0 6px; font-weight: 690; font-size: .9rem; }
 input:not([type=checkbox]), select, textarea { width: 100%; min-height: 44px; color: inherit; background: #0e140f; border: 1px solid #3c493c; border-radius: 8px; padding: 9px 10px; font-size: 1rem; }
 textarea { resize: vertical; font-family: ui-monospace, monospace; line-height: 1.55; }
+.start-order { margin-top: 7px; }
 .hint { margin-top: 7px; font-size: .82rem; line-height: 1.55; }
 .counter { float: right; color: var(--subtle); font-variant-numeric: tabular-nums; }
 .counter.full { color: var(--accent); }
@@ -71,6 +72,9 @@ dialog::backdrop { background: #061008cc; }
 .history-list { list-style: none; padding: 0; }
 .history-list li { display: flex; gap: 5px; align-items: center; margin-block: 5px; }
 .history-list li button:first-child { flex: 1; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 455px) {
+  #start-preview { min-height: 12.5rem; }
+}
 @media (min-width: 815px) {
   main { padding-top: 39px; }
   .layout { grid-template-columns: minmax(0, .94fr) minmax(0, 1.06fr); gap: 19px; }

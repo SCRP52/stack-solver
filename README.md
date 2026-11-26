@@ -1,6 +1,6 @@
 # Stack Converter
 
-Web app tìm và mô phỏng cách chuyển từ stack bài xuất phát sang stack đích. Chọn preset hoặc nhập 52 lá cho mỗi đầu. Với đích theo vị trí, nhập dạng `1=AS, 17=QC, 52=KD`.
+Web app tìm và mô phỏng cách chuyển từ stack ban đầu sang stack đích. Chọn bộ 52 lá hoặc packet từ 1 đến 52 lá. Có thể nhập toàn bộ hoặc điền vài ô có số ở cả hai đầu. Khi để trống ô ban đầu, kết quả mô tả một bộ bài tương thích với các lá đã nhập. Nút Đảo thứ tự lật toàn bộ thứ tự, kể cả vị trí trống.
 
 - Các nước gồm faro in/out, faro lệch, cut, cắt nhiều cọc, run, đảo đoạn đầu, cull, reverse cull và chia tối đa 10 tụ.
 - Faro lệch xen từ đầu hoặc từ đáy, phần dư nằm cùng một đầu. Cắt nhiều cọc có giới hạn từ 3 đến 10 cọc và tùy chọn đổi thứ tự lúc gom. Hướng dẫn hiển thị hai lá kẹp mỗi chỗ cắt và thứ tự gom từ trên xuống.

@@ -5,7 +5,7 @@ export const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q
 // physical card order separately from this internal lookup table.
 const cardsById = [...'SDCH'].flatMap(suit => (('SD'.includes(suit) ? ranks : [...ranks].reverse()).map(rank => rank + suit)));
 export const ndo = [...cardsById].reverse();
-const size = cardsById.length;
+const deckSize = cardsById.length;
 const base = 33;
 const ids = cardsById.map((_, i) => String.fromCharCode(base + i)).join('');
 const cardIds = new Map(cardsById.map((card, i) => [card, ids[i]]));
@@ -23,16 +23,16 @@ export const mnemonica = '4C 2H 7D 3C 4H 6D AS 5H 9S 2S QH 3D QC 8H 6S 5S 9H KC 
 const normalizeCards = raw => raw.trim().toUpperCase().replace(/[♠♦♣♥]/g, suit => suits[suit]);
 const normalizeRank = card => card.replace(/^T([SDCH])$/, '10$1');
 
-export function parseCards(raw) {
+export function parseCards(raw, size = deckSize) {
   const cards = normalizeCards(raw).split(/[\s,;|/]+/).filter(Boolean).map(normalizeRank);
   const invalid = cards.find(card => !cardIds.has(card));
   if (invalid) throw new ConverterError('unknownCard', invalid);
   if (new Set(cards).size !== cards.length) throw new ConverterError('repeatCard');
-  if (cards.length !== size) throw new ConverterError('deckSize', cards.length);
+  if (cards.length !== size) throw new ConverterError('deckSize', cards.length, size);
   return cards.map(card => cardIds.get(card)).join('');
 }
 
-export function parsePositions(raw) {
+export function parsePositions(raw, size = deckSize) {
   const entries = normalizeCards(raw).replace(/\s*[:=]\s*/g, '=').split(/[\s,;]+/).filter(Boolean);
   if (!entries.length) throw new ConverterError('needPositions');
   const slots = new Set();
@@ -42,7 +42,7 @@ export function parsePositions(raw) {
     if (!match) throw new ConverterError('badPosition', entry);
     const position = Number(match[1]);
     const card = cardIds.get(normalizeRank(match[2]));
-    if (position < 1 || position > size) throw new ConverterError('positionRange', position);
+    if (position < 1 || position > size) throw new ConverterError('positionRange', position, size);
     if (!card) throw new ConverterError('unknownCard', match[2]);
     if (slots.has(position) || cards.has(card)) throw new ConverterError('repeatPosition');
     slots.add(position);
@@ -53,6 +53,15 @@ export function parsePositions(raw) {
 
 export const displayCards = state => [...state].map(letter => cardsById[index(letter)]);
 export const newDeck = () => ndo.map(card => cardIds.get(card)).join('');
+export const cardCode = raw => {
+  const card = normalizeRank(normalizeCards(raw));
+  return cardIds.has(card) ? card : null;
+};
+
+function createSolver(size) {
+const ids = Array.from({ length: size }, (_, i) => String.fromCharCode(i + base)).join('');
+const half = size / 2;
+const quarter = Math.floor(size / 4);
 
 function weaveMap(mask) {
   const split = [...mask].filter(letter => letter === 'A').length;
@@ -63,7 +72,7 @@ function weaveMap(mask) {
 
 function interleave(split, first, lead = 0) {
   const pairs = Math.min(split, size - split);
-  const spare = split > 26 ? 'A' : 'B';
+  const spare = split > half ? 'A' : 'B';
   return spare.repeat(lead) + (first === 'A' ? 'AB' : 'BA').repeat(pairs) + spare.repeat(size - 2 * pairs - lead);
 }
 
@@ -112,7 +121,7 @@ function moveFromMap(kind, label, map, params, apply) {
 const flipSlot = slot => size - 1 - slot;
 const flipSlots = slots => slots.map(flipSlot).reverse();
 
-export function makeCullMove(slots, landing, options = defaults, direction = 'down') {
+function makeCullMove(slots, landing, options = defaults, direction = 'down') {
   if (!options.cull || !slots.length || slots.length > options.cullMax) return null;
   const destinations = Array.isArray(landing) ? landing : slots.map((_, i) => landing + i);
   if (destinations.length !== slots.length) return null;
@@ -136,7 +145,7 @@ export function makeCullMove(slots, landing, options = defaults, direction = 'do
   return moveFromMap('cull', label, map, { slots, destinations, direction }, apply);
 }
 
-export function makeReverseCullMove(insertAt) {
+function makeReverseCullMove(insertAt) {
   if (!Number.isInteger(insertAt) || insertAt < 0 || insertAt >= size - 1) return null;
   const map = positions.slice(0, insertAt).concat(size - 1, positions.slice(insertAt, -1));
   return moveFromMap('reverse-cull', 'Reverse cull · dưới lên', map,
@@ -144,8 +153,8 @@ export function makeReverseCullMove(insertAt) {
     state => state.slice(0, insertAt) + state.at(-1) + state.slice(insertAt, -1));
 }
 
-export function makeDealMove(count, order) {
-  if (!Number.isInteger(count) || count < 2 || count > 10 || !Array.isArray(order) || order.length !== count ||
+function makeDealMove(count, order) {
+  if (!Number.isInteger(count) || count < 2 || count > Math.min(10, size) || !Array.isArray(order) || order.length !== count ||
     new Set(order).size !== count || order.some(pile => !Number.isInteger(pile) || pile < 1 || pile > count)) return null;
   const map = order.flatMap(pile => pileSlots[count][pile - 1]);
   return moveFromMap('deal', `Chia ${count} tụ · gom ${order.join(' → ')}`, map, { count, order: order.slice() });
@@ -159,7 +168,8 @@ function* allPileOrders(piles, used = []) {
 }
 
 const threePileOrders = [...allPileOrders([1, 2, 3])];
-const blockCutSplits = [[13, 26], [13, 39], [26, 39], [13, 26, 39]];
+const blockCutSplits = quarter ? [[quarter, 2 * quarter], [quarter, 3 * quarter], [2 * quarter, 3 * quarter], [quarter, 2 * quarter, 3 * quarter]]
+  : size === 3 ? [[1, 2]] : [];
 
 function makeMultiCutMove(splits, order, stacked = false) {
   const boundaries = [0, ...splits, size];
@@ -177,7 +187,7 @@ function* cyclicPileOrders(count) {
   }
 }
 
-export function cullTimeline({ slots, destinations, direction = 'down' }) {
+function cullTimeline({ slots, destinations, direction = 'down' }) {
   if (!destinations) return [];
   const up = direction === 'up';
   if (up) { slots = flipSlots(slots); destinations = flipSlots(destinations); }
@@ -205,7 +215,7 @@ export function cullTimeline({ slots, destinations, direction = 'down' }) {
   return events;
 }
 
-export function makeMoves(options = defaults) {
+function makeMoves(options = defaults) {
   const config = { ...defaults, ...options };
   const unique = new Map();
   const cuts = new Map();
@@ -226,15 +236,15 @@ export function makeMoves(options = defaults) {
 
   for (const kind of ['out', 'in']) {
     const first = kind === 'out' ? 'A' : 'B';
-    if (config[kind]) add('faro', `Faro ${kind}`, weaveMap(interleave(26, first)), { split: 26, first });
+    if (size > 1 && Number.isInteger(half) && config[kind]) add('faro', `Faro ${kind}`, weaveMap(interleave(half, first)), { split: half, first });
     if (config.near) {
       if (!Number.isInteger(config.faroWindow) || config.faroWindow < 1 || config.faroWindow > 25) {
         throw new ConverterError('faroRange');
       }
-      for (let split = 26 - config.faroWindow; split <= 26 + config.faroWindow; split++) {
-        if (split === 26) continue;
-        const spare = split > 26 ? 'A' : 'B';
-        const extra = 2 * Math.abs(26 - split);
+      for (let split = Math.max(1, Math.ceil(half - config.faroWindow)); split <= Math.min(size - 1, Math.floor(half + config.faroWindow)); split++) {
+        if (split === half) continue;
+        const spare = split > half ? 'A' : 'B';
+        const extra = Math.abs(size - 2 * split);
         for (const lead of [0, extra]) {
           const from = lead ? 'bottom' : 'top';
           const label = `Faro ${kind} ${split}/${size - split} · xen từ ${lead ? 'đáy' : 'đầu'}`;
@@ -252,7 +262,7 @@ export function makeMoves(options = defaults) {
     }
   }
   if (config.run) {
-    for (let n = 2; n <= config.runMax; n++) {
+    for (let n = 2; n <= Math.min(size, config.runMax); n++) {
       const map = positions.slice(n).concat(positions.slice(0, n).reverse());
       const move = add('run', `Run ${n}`, map, { n }, state => state.slice(n) + reverseRange(state, 0, n));
       if (move.kind === 'run') move.undo = state => reverseRange(state, size - n, size) + state.slice(0, size - n);
@@ -260,7 +270,7 @@ export function makeMoves(options = defaults) {
     }
   }
   if (config.reverse) {
-    for (let n = 2; n <= config.runMax; n++) {
+    for (let n = 2; n <= Math.min(size, config.runMax); n++) {
       const apply = state => reverseRange(state, 0, n) + state.slice(n);
       const map = positions.slice(0, n).reverse().concat(positions.slice(n));
       const move = add('reverse', `Đảo ${n} lá đầu`, map, { n }, apply);
@@ -269,11 +279,11 @@ export function makeMoves(options = defaults) {
   }
   let wideMultiCut = null;
   const multiCut = options.multiCut ?? Boolean(options.multiCutOverhand || options.multiCutReorder);
-  if (multiCut) {
+  if (multiCut && size >= 3) {
     if (!Number.isInteger(config.multiCutMax) || config.multiCutMax < 3 || config.multiCutMax > 10) {
       throw new ConverterError('cutRange');
     }
-    wideMultiCut = { maxPiles: config.multiCutMax, reorder: config.multiCutReorder, allowRotation: !config.cut };
+    wideMultiCut = { maxPiles: Math.min(size, config.multiCutMax), reorder: config.multiCutReorder, allowRotation: !config.cut };
     // Keep suit-sized blocks available during the search. Other cut positions
     // are inferred from the decks or varied dynamically.
     for (const splits of blockCutSplits) {
@@ -291,6 +301,7 @@ export function makeMoves(options = defaults) {
       throw new ConverterError('dealRange');
     }
     if (!['ordered', 'any'].includes(config.dealOrder)) throw new ConverterError('dealOrder');
+    config.dealMax = Math.min(size, config.dealMax);
     for (let count = 2; count <= config.dealMax; count++) {
       const orders = config.dealOrder === 'any' && count <= 5
         ? allPileOrders(Array.from({ length: count }, (_, i) => i + 1)) : cyclicPileOrders(count);
@@ -303,7 +314,7 @@ export function makeMoves(options = defaults) {
   // The lookup graph keeps a small cull vocabulary. The larger culls are
   // generated against the deck being solved, since choosing five subsets
   // and every landing point would dwarf the other move families.
-  const wideCull = config.cull && (config.cullDeeper || config.cullMax > 2);
+  const wideCull = size > 1 && config.cull && (config.cullDeeper || config.cullMax > 2);
   if (config.cull) {
     if (!Number.isInteger(config.cullMax) || config.cullMax < 1 || config.cullMax > 5) {
       throw new ConverterError('cullRange');
@@ -344,14 +355,15 @@ function handlingPenalty(move, neighbor, packetStreak) {
   return penalty;
 }
 
-export function replay(start, route) {
+function replay(start, route, render = displayCards) {
   const steps = [];
   let state = start;
   for (const move of route) {
     if (sameCull(steps.at(-1), move)) throw new ConverterError('cullsConsecutive');
-    const cards = isCull(move) ? move.params.slots.map(slot => cardsById[index(state[slot])]) : undefined;
+    const before = isCull(move) ? render(state) : null;
+    const cards = before ? move.params.slots.map(slot => before[slot]) : undefined;
     state = move.apply(state);
-    steps.push({ kind: move.kind, label: move.label, params: move.params, cards, deck: displayCards(state) });
+    steps.push({ kind: move.kind, label: move.label, params: move.params, cards, deck: render(state) });
   }
   return { final: state, steps };
 }
@@ -366,7 +378,7 @@ function findDirectCull(start, target, config) {
   }
   if (!config.cull) return null;
 
-  const sourceSlots = new Uint8Array(size);
+  const sourceSlots = new Uint8Array(deckSize);
   for (let i = 0; i < size; i++) sourceSlots[index(start[i])] = i;
 
   function alongSpread(direction) {
@@ -449,7 +461,7 @@ function directExpandedMove(start, target, moves, allowCull = true) {
 }
 
 function finishingKey(start, target) {
-  const slots = new Uint8Array(size);
+  const slots = new Uint8Array(deckSize);
   for (let i = 0; i < size; i++) slots[index(start[i])] = i;
   let permutation = '';
   for (let i = 0; i < size; i++) permutation += ids[slots[index(target[i])]];
@@ -573,9 +585,10 @@ function searchPartialThreePileCuts(start, required, allowRotation, expired, off
   }
 }
 
-function searchPartialShallow(start, required, moves, expired, offer, enough) {
+function searchPartialShallow(start, required, moves, expired, offer, enough, pattern) {
   const expanded = moves.wideCull || moves.wideDeal || moves.wideMultiCut;
-  const matches = state => required.every(([slot, card]) => state[slot] === card);
+  const matches = pattern?.matches ?? ((state, map) => required.every(([slot, card]) => state[map ? map[slot] : slot] === card));
+  const goal = state => pattern?.guide(state) ?? completeTarget(state, required);
   const afterOne = [];
   for (const move of moves.list) {
     if (expired()) return 0;
@@ -583,7 +596,7 @@ function searchPartialShallow(start, required, moves, expired, offer, enough) {
     if (matches(state)) offer([move]);
     else afterOne.push([state, move]);
   }
-  if (expanded) offer([directExpandedMove(start, completeTarget(start, required), moves)]);
+  if (expanded) offer([directExpandedMove(start, goal(start), moves)]);
   if (moves.wideMultiCut && !enough(1) && !expired()) {
     const { maxPiles, reorder, allowRotation } = moves.wideMultiCut;
     offer([findPartialStackedCut(start, required, maxPiles)]);
@@ -592,27 +605,27 @@ function searchPartialShallow(start, required, moves, expired, offer, enough) {
   for (const [state, first] of afterOne) {
     if (expired() || enough(2)) return expanded ? 0 : 1;
     for (const last of moves.list) {
-      if (!sameCull(first, last) && required.every(([slot, card]) => state[last.map[slot]] === card)) offer([first, last]);
+      if (!sameCull(first, last) && matches(state, last.map)) offer([first, last]);
     }
-    if (expanded) offer([first, directExpandedMove(state, completeTarget(state, required), moves, !isCull(first))]);
+    if (expanded) offer([first, directExpandedMove(state, goal(state), moves, !isCull(first))]);
   }
   if (expanded) {
     for (const last of moves.list) {
       if (expired() || enough(2)) break;
       const before = required.map(([slot, card]) => [last.map[slot], card]);
-      offer([directExpandedMove(start, completeTarget(start, before), moves, !isCull(last)), last]);
+      offer([directExpandedMove(start, pattern?.guide(start, last.map) ?? completeTarget(start, before), moves, !isCull(last)), last]);
     }
   }
   return expanded ? 0 : 2;
 }
 
-function searchPractical(start, target, required, moves, expired, offer, enough, width, adjacencyWeight = 8) {
+function searchPractical(start, target, required, moves, expired, offer, enough, width, adjacencyWeight = 8, pattern) {
   const operations = moves.list.filter(move => !isCull(move));
   if (!operations.some(move => move.kind !== 'cut')) return;
   function side(state, wanted, backward) {
     const root = { state, handling: 0, packetStreak: 0 };
-    const weights = Array.from({ length: size }, () => new Uint8Array(size));
-    const nextCard = new Uint8Array(size);
+    const weights = Array.from({ length: size }, () => new Uint8Array(deckSize));
+    const nextCard = new Uint8Array(deckSize);
     for (const [slot, card] of required ?? [...wanted].map((card, slot) => [slot, card])) {
       for (let at = Math.max(0, slot - 3); at <= Math.min(size - 1, slot + 3); at++) {
         weights[at][index(card)] = at === slot ? 12 : 4 - Math.abs(at - slot);
@@ -638,7 +651,7 @@ function searchPractical(start, target, required, moves, expired, offer, enough,
           const first = directExpandedMove(start, parent.state, moves);
           if (first) offer([first, ...readRoute(left.root, parent)]);
         } else {
-          const finish = directExpandedMove(parent.state, required ? completeTarget(parent.state, required) : target, moves);
+          const finish = directExpandedMove(parent.state, pattern?.guide(parent.state) ?? (required ? completeTarget(parent.state, required) : target), moves);
           if (finish) offer([...readRoute(parent, right.root), finish]);
         }
       }
@@ -651,7 +664,7 @@ function searchPractical(start, target, required, moves, expired, offer, enough,
         const handling = parent.handling + handlingPenalty(move, parent.move, packetStreak);
         const node = { state, parent, move, handling, packetStreak };
         if (match) offer(backward ? readRoute(match, node) : readRoute(node, match));
-        if (required?.every(([slot, card]) => state[slot] === card)) { offer(readRoute(node, right.root)); continue; }
+        if (pattern ? pattern.matches(state) : required?.every(([slot, card]) => state[slot] === card)) { offer(readRoute(node, right.root)); continue; }
         const prior = candidates.get(state) ?? current.seen.get(state);
         if (prior && (prior.handling < handling || (prior.handling === handling && prior.packetStreak <= packetStreak))) continue;
         let score = -6 * handling;
@@ -920,12 +933,13 @@ function readRoute(left, right) {
 // finish with a reversal, partial weave or deal, and cut. This applies to any
 // pair of decks and produces candidates checked by the same replay as BFS.
 function findStructured(start, target, moves, expired, offer, enough, suggestPackets) {
+  if (!quarter || !Number.isInteger(half)) return;
   const blockMoves = moves.list.filter(move => {
     const p = move.params;
-    if (move.kind === 'multi-cut') return p.splits.every(split => split % 13 === 0);
-    return ['cut', 'run', 'reverse'].includes(move.kind) && p.n % 13 === 0;
+    if (move.kind === 'multi-cut') return p.splits.every(split => split % quarter === 0);
+    return ['cut', 'run', 'reverse'].includes(move.kind) && p.n % quarter === 0;
   });
-  const faros = moves.list.filter(move => move.kind === 'faro' && move.params.split === 26);
+  const faros = moves.list.filter(move => move.kind === 'faro' && move.params.split === half);
   const reversals = moves.list.filter(move => move.kind === 'reverse');
   const finishingMoves = moves.list.filter(move => ['faro', 'deal', 'run', 'reverse'].includes(move.kind));
 
@@ -1186,12 +1200,12 @@ function routeCost(route) {
 
 const compareRoutes = (a, b) => a.score - b.score || a.heavy - b.heavy || a.topDown - b.topDown || a.route.length - b.route.length;
 
-export function solve(start, requested, options, limits, notify = () => {}) {
+function solve(start, requested, options, limits, notify = () => {}, pattern) {
   const moves = makeMoves(options);
   const expanded = moves.wideCull || moves.wideDeal || moves.wideMultiCut;
   const required = Array.isArray(requested) ? requested : null;
-  const target = required ? completeTarget(start, required) : requested;
-  const matches = state => required ? required.every(([slot, card]) => state[slot] === card) : state === target;
+  const target = pattern?.guide(start) ?? (required ? completeTarget(start, required) : requested);
+  const matches = pattern?.matches ?? (state => required ? required.every(([slot, card]) => state[slot] === card) : state === target);
   const alreadyMatched = matches(start);
   const started = performance.now();
   const clock = { expired: () => performance.now() - started >= limits.seconds * 1000 };
@@ -1208,6 +1222,12 @@ export function solve(start, requested, options, limits, notify = () => {}) {
   const enough = maxCost => choices.length === maxChoices && choices.at(-1).score <= maxCost;
   const suggested = () => choices.filter(choice => choice.route === best ||
     choice.heavy <= choices[0].heavy + 2 || choice.score <= choices[0].score + 6);
+  function results() {
+    const selected = suggested();
+    return { shortestLength: best?.length ?? null, practicalScore: choices[0]?.score ?? null,
+      steps: choices[0]?.steps ?? null, routes: selected.map(choice => choice.steps),
+      ...(pattern ? { routeStarts: selected.map(choice => choice.startCards) } : {}) };
+  }
 
   function report(phase, depth, count, force = false) {
     const elapsed = performance.now() - started;
@@ -1221,8 +1241,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
     const now = performance.now();
     if (!best || (!force && now - lastCandidate < 175)) return;
     lastCandidate = now;
-    notify({ type: 'candidate', shortestLength: best.length, practicalScore: choices[0].score,
-      steps: choices[0].steps, routes: suggested().map(choice => choice.steps) });
+    notify({ type: 'candidate', ...results() });
   }
 
   function offer(route, announce = false) {
@@ -1240,16 +1259,18 @@ export function solve(start, requested, options, limits, notify = () => {}) {
       if (route[i - 1].kind !== 'cut' || route[i].kind !== 'cut') continue;
       if ((route[i - 1].params.n + route[i].params.n) % size || !sameCull(route[i - 2], route[i + 1])) return;
     }
-    const { final, steps } = replay(start, route);
-    if (!matches(final)) throw new ConverterError('wrongFinal');
-    const seen = new Map([[displayCards(start).join(','), 0]]);
-    for (let i = 0; i < steps.length; i++) {
-      const deck = steps[i].deck.join(',');
+    let deck = start;
+    const seen = new Map([[start, 0]]);
+    for (let i = 0; i < route.length; i++) {
+      deck = route[i].apply(deck);
       if (seen.has(deck) && !sameCull(route[seen.get(deck) - 1], route[i + 1])) return;
       seen.set(deck, i + 1);
     }
+    if (!matches(deck)) throw new ConverterError('wrongFinal');
+    const render = pattern?.render(deck) ?? displayCards;
+    const { steps } = replay(start, route, render);
     if (duplicate) choices.splice(choices.indexOf(duplicate), 1);
-    choices.push({ ...candidate, steps });
+    choices.push({ ...candidate, steps, startCards: pattern ? render(start) : undefined });
     choices.sort(compareRoutes);
     // Keep one shortest chain alongside the most practical choices.
     const shortest = choices.reduce((first, choice) => choice.route.length < first.route.length ? choice : first);
@@ -1263,7 +1284,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
   if (alreadyMatched) offer([]);
   else {
     const shallowDepth = required
-      ? searchPartialShallow(start, required, moves, clock.expired, offer, enough)
+      ? searchPartialShallow(start, required, moves, clock.expired, offer, enough, pattern)
       : findShallowRoutes(start, target, moves, clock.expired, offer, enough);
     provedThrough = best ? Math.min(shallowDepth, best.length - 1) : shallowDepth;
     publishCandidate(true);
@@ -1272,7 +1293,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
     const searching = () => !best || best.length > provedThrough + 1 || !enough(best.length + 1);
     if (searching()) {
       report('structured', provedThrough, checked, true);
-      const goalSlots = new Uint8Array(size);
+      const goalSlots = new Uint8Array(deckSize);
       for (let slot = 0; slot < size; slot++) goalSlots[index(target[slot])] = slot;
       const seeds = new Map();
       function suggestPackets(state, route) {
@@ -1312,7 +1333,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
       offer(buildWithCulls(start, target, moves, 0));
       report('practical', provedThrough, checked, true);
       const practicalUntil = performance.now() + Math.min(3, limits.seconds * 0.22) * 1000;
-      searchPractical(start, target, required, moves, () => clock.expired() || performance.now() >= practicalUntil, offer, enough, beamWidth);
+      searchPractical(start, target, required, moves, () => clock.expired() || performance.now() >= practicalUntil, offer, enough, beamWidth, 8, pattern);
       offer(buildWithPacketCuts(start, target, moves, clock.expired));
       offer(buildWithPacketCuts(start, target, moves, clock.expired, true));
       for (let rotation = 1; rotation < size && !clock.expired() && searching(); rotation++) {
@@ -1344,7 +1365,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
       if (performance.now() >= beamAt) {
         const until = performance.now() + 1500;
         searchPractical(start, target, required, moves, () => clock.expired() || performance.now() >= until,
-          offer, enough, beamWidth * 2, [4, 14, 0, 8][beamRuns++ % 4]);
+          offer, enough, beamWidth * 2, [4, 14, 0, 8][beamRuns++ % 4], pattern);
         beamAt = performance.now() + 6000;
       }
       if (best !== savedRoute) {
@@ -1377,7 +1398,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
       }
       const rotation = Math.floor(Math.random() * size);
       const chooseCullTail = attempts % 2 ? buildWithCulls : buildWithInsertedCulls;
-      const goal = required ? completeTarget(state, required) : target;
+      const goal = pattern?.guide(state) ?? (required ? completeTarget(state, required) : target);
       const finishing = finishingMove(state, goal, moves);
       const tail = matches(state) ? [] : finishing ? [finishing] : chooseCullTail(state, goal, moves, rotation) ??
         buildWithCulls(state, goal, moves, rotation) ?? buildWithRuns(state, goal, moves);
@@ -1393,16 +1414,54 @@ export function solve(start, requested, options, limits, notify = () => {}) {
   }
   if (best) provedThrough = Math.min(provedThrough, best.length - 1);
   const optimal = best !== null && provedThrough >= best.length - 1;
-  return { type: 'done', optimal, provedThrough, checked, attempts, seconds: (performance.now() - started) / 1000,
-    shortestLength: best?.length ?? null, practicalScore: choices[0]?.score ?? null,
-    steps: choices[0]?.steps ?? null, routes: suggested().map(choice => choice.steps) };
+  return { type: 'done', optimal, provedThrough, checked, attempts, seconds: (performance.now() - started) / 1000, ...results() };
 }
 
-export function demoStack(start = newDeck()) {
-  const moves = makeMoves();
-  let state = start;
-  for (const move of [moves.list[0], moves.culls.get('19'), moves.cuts.get(17), moves.runs.get(7)]) {
-    state = move.apply(state);
+function solveFromPositions(given, wanted, options, limits, notify) {
+  const target = Array.isArray(wanted) ? wanted : [...wanted].map((card, slot) => [slot, card]);
+  const tokens = new Map(given.map(([slot, card]) => [card, ids[slot]]));
+  const fixedTokens = new Set(tokens.values());
+  const known = new Map(given.map(([slot, card]) => [ids[slot], cardsById[index(card)]]));
+  const constraints = target.map(([slot, card]) => [slot, tokens.get(card)]);
+  const matches = (state, map) => constraints.every(([slot, token]) => {
+    const found = state[map ? map[slot] : slot];
+    return token ? token === found : !fixedTokens.has(found);
+  });
+  function guide(state, map) {
+    const used = new Set(fixedTokens);
+    const wanted = constraints.map(([slot, token]) => {
+      const position = map ? map[slot] : slot;
+      const current = state[position];
+      if (token || used.has(current)) return [position, token];
+      used.add(current);
+      return [position, current];
+    });
+    const free = [...state].filter(token => !used.has(token));
+    return completeTarget(state, wanted.map(([slot, token]) => [slot, token ?? free.shift()]));
   }
-  return displayCards(state).join(' ');
+  function render(final) {
+    const labels = new Map(known);
+    for (const [slot, card] of target) labels.set(final[slot], cardsById[index(card)]);
+    return state => [...state].map(token => labels.get(token) ?? '?');
+  }
+  const initialGoal = guide(ids);
+  const required = constraints.map(([slot]) => [slot, initialGoal[slot]]);
+  return solve(ids, required, options, limits, notify, { matches, guide, render });
+}
+
+return { solve, solveFromPositions, makeMoves, makeCullMove, makeReverseCullMove, makeDealMove, replay, cullTimeline };
+}
+
+const fullSolver = createSolver(deckSize);
+const solverFor = size => size === deckSize ? fullSolver : createSolver(size);
+export const { makeMoves, makeCullMove, makeReverseCullMove, makeDealMove, replay } = fullSolver;
+export const cullTimeline = (params, size = deckSize) => solverFor(size).cullTimeline(params);
+
+export function solve(start, target, options, limits, notify, size = Array.isArray(start) ? deckSize : start.length) {
+  if (!Number.isInteger(size) || size < 1 || size > deckSize) throw new ConverterError('packetSize');
+  const labels = input => Array.isArray(input) ? input.map(([, card]) => card) : [...input];
+  if (new Set([...labels(start), ...labels(target)]).size > size) throw new ConverterError('cardSet', size);
+  const solver = solverFor(size);
+  return Array.isArray(start) ? solver.solveFromPositions(start, target, options, limits, notify) :
+    solver.solve(start, target, options, limits, notify);
 }

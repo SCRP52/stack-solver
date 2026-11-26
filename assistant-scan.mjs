@@ -1,23 +1,21 @@
-import { agreeOnCard, createStableCardGate, meanPixelDifference } from './assistant-scan-logic.mjs?v=39';
+import { createStableCardGate } from './assistant-scan-logic.mjs?v=39';
+import { findCardCorners } from './assistant-corners.mjs?v=40';
+import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
 
 const $ = id => document.getElementById(id);
-const rankCrop = document.createElement('canvas');
-const suitCrop = document.createElement('canvas');
+const capture = $('assistant-frame');
 const ocrCrop = document.createElement('canvas');
-const capture = document.getElementById('assistant-frame');
-rankCrop.width = suitCrop.width = 144;
-rankCrop.height = 128;
-suitCrop.height = 128;
-ocrCrop.width = rankCrop.width;
-ocrCrop.height = rankCrop.height;
-capture.width = 480;
-capture.height = 640;
+ocrCrop.width = 32;
+ocrCrop.height = 40;
 
 const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 const suitNames = { S: ['Bích', 'Spades'], H: ['Cơ', 'Hearts'], D: ['Rô', 'Diamonds'], C: ['Chuồn', 'Clubs'] };
 const suitSymbols = { S: '♠', H: '♥', D: '♦', C: '♣' };
 const suitCanvases = makeSuitTemplates();
 const rankCanvases = makeRankTemplates();
+const stretchedRanks = Object.fromEntries(ranks.map(rank => [
+  rank, rankCanvases[rank].map(({ mask }) => ({ mask: stretchRankWidth(mask) })),
+]));
 let stream;
 let wakeLock;
 let frameTimer;
@@ -54,8 +52,8 @@ function makeSuitTemplates() {
       ctx.moveTo(14, 25); ctx.lineTo(11, 39); ctx.lineTo(21, 39); ctx.lineTo(18, 25); ctx.closePath();
     }
     ctx.fill();
-    const masks = [maskOf(canvas.getContext('2d').getImageData(0, 0, 32, 40))];
-    for (const font of ['serif', 'Georgia', 'Times New Roman', 'Arial', 'sans-serif']) {
+    const masks = [maskOf(canvas.getContext('2d').getImageData(0, 0, 32, 40)), decodeShape(suit)];
+    for (const font of ['Georgia', 'Times New Roman', 'Arial', 'Verdana', 'Tahoma']) {
       const glyph = document.createElement('canvas');
       glyph.width = 32; glyph.height = 40;
       const glyphCtx = glyph.getContext('2d');
@@ -74,20 +72,29 @@ function makeSuitTemplates() {
 function makeRankTemplates() {
   const result = {};
   for (const rank of ranks) {
-    result[rank] = [];
-    for (const font of ['serif', 'Georgia', 'Times New Roman', 'Arial', 'sans-serif']) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 32; canvas.height = 40;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#000';
-      ctx.font = `${rank === '10' ? 27 : 36}px "${font}"`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(rank, 16, 20);
-      result[rank].push(maskOf(ctx.getImageData(0, 0, 32, 40)));
+    result[rank] = [decodeShape(rank)];
+    for (const font of ['Georgia', 'Times New Roman', 'Arial', 'Tahoma']) {
+      for (const weight of [400, 700]) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 144; canvas.height = 112;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.font = `${weight} 80px "${font}"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(rank, 72, 56);
+        result[rank].push(maskOf(ctx.getImageData(0, 0, 144, 112)));
+      }
     }
   }
   return result;
+}
+
+function decodeShape(label) {
+  const bytes = atob(cardIndexShapes[label]);
+  const mask = new Uint8Array(32 * 40);
+  for (let i = 0; i < mask.length; i++) mask[i] = (bytes.charCodeAt(i >> 3) >> (i & 7)) & 1;
+  return { mask };
 }
 
 function maskOf(imageData) {
@@ -99,71 +106,18 @@ function maskOf(imageData) {
     const hit = data[i + 3] > 20 && data[i] < 170;
     if (hit) { mask[y * width + x] = 1; left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y); }
   }
-  if (right < left || bottom < top) return { mask: new Uint8Array(width * height), width, height, left, top, right, bottom };
+  if (right < left || bottom < top) return { mask: new Uint8Array(32 * 40) };
   const w = right - left + 1, h = bottom - top + 1;
   const scale = Math.min(26 / w, 34 / h);
   const outW = Math.max(1, Math.round(w * scale)), outH = Math.max(1, Math.round(h * scale));
-  const normalized = new Uint8Array(width * height);
-  const ox = Math.floor((width - outW) / 2), oy = Math.floor((height - outH) / 2);
-  for (let y = 0; y < outH; y++) for (let x = 0; x < outW; x++) {
-    const sx = left + Math.min(w - 1, Math.floor(x / scale));
-    const sy = top + Math.min(h - 1, Math.floor(y / scale));
-    normalized[(oy + y) * width + ox + x] = mask[sy * width + sx];
-  }
-  return { mask: normalized, width, height, left: ox, top: oy, right: ox + outW - 1, bottom: oy + outH - 1 };
-}
-
-function normalizedMask(imageData, largestOnly = true) {
-  const { data, width, height } = imageData;
-  const raw = new Uint8Array(width * height);
-  let left = width, top = height, right = -1, bottom = -1;
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const i = (y * width + x) * 4;
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    const redInk = r > 55 && r > g * 1.28 && r > b * 1.15 && g < 175;
-    const blackInk = (r + g + b) / 3 < 135;
-    if (redInk || blackInk) { raw[y * width + x] = 1; left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y); }
-  }
-  if (right <= left || bottom <= top) return null;
-  if (largestOnly) {
-    const visited = new Uint8Array(raw.length);
-    const queue = new Int32Array(raw.length);
-    let largest = [];
-    for (let i = 0; i < raw.length; i++) {
-      if (!raw[i] || visited[i]) continue;
-      let head = 0, tail = 0;
-      queue[tail++] = i; visited[i] = 1;
-      while (head < tail) {
-        const at = queue[head++], px = at % width, py = Math.floor(at / width);
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          const nx = px + dx, ny = py + dy, ni = ny * width + nx;
-          if ((dx || dy) && nx >= 0 && nx < width && ny >= 0 && ny < height && raw[ni] && !visited[ni]) {
-            visited[ni] = 1; queue[tail++] = ni;
-          }
-        }
-      }
-      if (tail > largest.length) largest = Array.from(queue.subarray(0, tail));
-    }
-    if (largest.length < 12) return null;
-    raw.fill(0);
-    left = width; top = height; right = -1; bottom = -1;
-    for (const i of largest) {
-      raw[i] = 1;
-      const x = i % width, y = Math.floor(i / width);
-      left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y);
-    }
-  }
-  const w = right - left + 1, h = bottom - top + 1;
-  const scale = Math.min(26 / w, 34 / h);
-  const outW = Math.max(1, Math.round(w * scale)), outH = Math.max(1, Math.round(h * scale));
-  const out = new Uint8Array(32 * 40);
+  const normalized = new Uint8Array(32 * 40);
   const ox = Math.floor((32 - outW) / 2), oy = Math.floor((40 - outH) / 2);
   for (let y = 0; y < outH; y++) for (let x = 0; x < outW; x++) {
     const sx = left + Math.min(w - 1, Math.floor(x / scale));
     const sy = top + Math.min(h - 1, Math.floor(y / scale));
-    out[(oy + y) * 32 + ox + x] = raw[sy * width + sx];
+    normalized[(oy + y) * 32 + ox + x] = mask[sy * width + sx];
   }
-  return out;
+  return { mask: normalized };
 }
 
 function compareMasks(a, b) {
@@ -182,177 +136,144 @@ function compareMasks(a, b) {
   return best;
 }
 
-function suitShapeDescriptor(mask) {
-  const rows = Array.from({ length: 40 }, (_, y) => {
-    let width = 0, runs = 0, inside = false;
-    for (let x = 0; x < 32; x++) {
-      const on = Boolean(mask[y * 32 + x]);
-      if (on) width++;
-      if (on && !inside) runs++;
-      inside = on;
-    }
-    return { width, runs };
-  });
-  const first = rows.findIndex(row => row.width);
-  const widest = Math.max(...rows.map(row => row.width));
-  const total = rows.reduce((sum, row) => sum + row.width, 0);
-  const early = rows.slice(first, first + 7);
-  const middle = rows[first + 8];
-  const tail = rows.slice(30, 39);
-  return {
-    earlyWidth: Math.max(...early.map(row => row.width)) / Math.max(1, widest),
-    earlyArea: early.reduce((sum, row) => sum + row.width, 0) / Math.max(1, total),
-    middleRuns: middle?.runs ?? 0,
-    tailWidth: Math.max(...tail.map(row => row.width)) / Math.max(1, widest),
-  };
-}
-
-function scoreSuit(ctx, x, y, w, h) {
-  const pixels = ctx.getImageData(Math.round(x), Math.round(y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
-  const sample = normalizedMask(pixels);
-  if (!sample) return null;
-  let best = null, score = 0;
-  const matches = [];
-  for (const [suit, mask] of Object.entries(suitCanvases)) {
-    const current = Math.max(...mask.map(template => compareMasks(sample, template.mask)));
-    matches.push({ suit, score: current });
-    if (current > score) { score = current; best = suit; }
-  }
-  const ranked = matches.sort((a, b) => b.score - a.score);
-  let resolved = best;
-  const gap = score - (ranked[1]?.score ?? 0);
-  const blackPair = new Set([ranked[0]?.suit, ranked[1]?.suit]);
-  const shape = suitShapeDescriptor(sample);
-  if (gap < .06 && blackPair.has('S') && blackPair.has('C')) resolved = shape.earlyArea >= .125 ? 'C' : 'S';
-  return { suit: resolved, score, gap, ranked, shape };
-}
-
-function identifySuit(ctx, x, y, w, h) {
-  const result = scoreSuit(ctx, x, y, w, h);
-  if (!result) return null;
-  const blackScore = Math.max(result.ranked.find(match => match.suit === 'S')?.score ?? 0, result.ranked.find(match => match.suit === 'C')?.score ?? 0);
-  const redScore = Math.max(result.ranked.find(match => match.suit === 'H')?.score ?? 0, result.ranked.find(match => match.suit === 'D')?.score ?? 0);
-  const blackShapeClear = blackScore >= .62 && blackScore >= redScore + .04;
-  if (blackShapeClear) return { suit: result.shape.earlyArea >= .125 ? 'C' : 'S', score: blackScore };
-  if (result.score < .68 || result.gap < .06) return null;
-  return { suit: result.suit, score: result.score };
-}
-
-function normalizeRank(raw) {
-  let value = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  value = value.replace(/IO|1O|I0|LO/g, '10');
-  if (value.includes('10')) return '10';
-  if (value === 'O' || value === '0') return 'Q';
-  const rank = value.match(/[AJQK2-9]/);
-  return rank?.[0] ?? null;
-}
-
-function scoreRank(canvas) {
-  const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
-  for (let y = 0; y < pixels.height; y++) for (let x = 0; x < pixels.width; x++) {
-    if (x < 3 || y < 3 || x >= pixels.width - 3 || y >= pixels.height - 3) {
-      const i = (y * pixels.width + x) * 4;
-      pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = 255;
+function glyphMask(ink, frameWidth, glyph, mirrored) {
+  const mask = new Uint8Array(32 * 40);
+  const scale = Math.min(26 / glyph.w, 34 / glyph.h);
+  const width = Math.round(glyph.w * scale), height = Math.round(glyph.h * scale);
+  const left = Math.floor((32 - width) / 2), top = Math.floor((40 - height) / 2);
+  for (let y = 0; y < height; y++) {
+    const sourceY = glyph.y + Math.min(glyph.h - 1, Math.floor(y / scale));
+    for (let x = 0; x < width; x++) {
+      const offset = Math.min(glyph.w - 1, Math.floor(x / scale));
+      const sourceX = mirrored ? glyph.right - offset : glyph.x + offset;
+      mask[(top + y) * 32 + left + x] = ink[sourceY * frameWidth + sourceX];
     }
   }
-  const sample = normalizedMask(pixels, false);
-  if (!sample) return null;
-  return ranks.map(rank => ({ rank, score: Math.max(...rankCanvases[rank].map(mask => compareMasks(sample, mask.mask))) }))
-    .sort((a, b) => b.score - a.score);
+  return mask;
 }
 
-function identifyRank(canvas) {
-  const matches = scoreRank(canvas);
-  return matches && matches[0].score >= .4 && matches[0].score - matches[1].score >= .035 ? matches[0] : null;
+function matchShapes(sample, templates, labels) {
+  return labels.map(label => ({
+    label,
+    score: Math.max(...templates[label].map(template => compareMasks(sample, template.mask))),
+  })).sort((a, b) => b.score - a.score);
 }
 
-function drawCornerCrop(frame, canvas, x, y, width, height, mirrored) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!mirrored) {
-    ctx.drawImage(frame, x, y, width, height, 0, 0, canvas.width, canvas.height);
-    return;
+function stretchRankWidth(mask) {
+  let left = 32, right = -1;
+  for (let i = 0; i < mask.length; i++) if (mask[i]) {
+    left = Math.min(left, i % 32);
+    right = Math.max(right, i % 32);
   }
-  ctx.save();
-  ctx.translate(canvas.width, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(frame, frame.width - x - width, y, width, height, 0, 0, canvas.width, canvas.height);
-  ctx.restore();
-}
-
-function prepareCardCrops(frame, mirrored) {
-  const { width: frameWidth, height: frameHeight } = frame;
-  const side = Math.min(frameWidth * .48, frameHeight * .54);
-  const x = Math.round((frameWidth - side) / 2);
-  const y = Math.round((frameHeight - side * 1.34) / 2);
-  const w = Math.round(side);
-  const h = Math.min(Math.round(side * 1.34), frameHeight - y);
-  if (h < 80) return false;
-  drawCornerCrop(frame, rankCrop, x, y, w * .74, h * .48, mirrored);
-  drawCornerCrop(frame, suitCrop, x, y + h * .5, w * .74, h * .48, mirrored);
-  return true;
-}
-
-function paperRatio(canvas) {
-  const data = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data;
-  let paper = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const low = Math.min(data[i], data[i + 1], data[i + 2]);
-    const high = Math.max(data[i], data[i + 1], data[i + 2]);
-    if (low > 175 && high - low < 48) paper++;
+  if (right < left) return mask;
+  const normalized = new Uint8Array(mask.length);
+  const width = right - left + 1;
+  for (let y = 0; y < 40; y++) for (let x = 0; x < 24; x++) {
+    normalized[y * 32 + x + 4] = mask[y * 32 + left + Math.floor(x * width / 24)];
   }
-  return paper / (data.length / 4);
+  return normalized;
 }
 
-function motionScore(history, mirrored) {
-  const current = new Uint8Array((rankCrop.width * rankCrop.height + suitCrop.width * suitCrop.height));
-  let offset = 0;
-  for (const canvas of [rankCrop, suitCrop]) {
-    const data = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data;
-    for (let i = 0; i < data.length; i += 4) current[offset++] = Math.round((data[i] * 3 + data[i + 1] * 6 + data[i + 2]) / 10);
+function readRankText(mask) {
+  if (typeof window.OCRAD !== 'function') return null;
+  const context = ocrCrop.getContext('2d');
+  const image = context.createImageData(32, 40);
+  for (let i = 0; i < mask.length; i++) {
+    const value = mask[i] ? 0 : 255;
+    image.data[i * 4] = image.data[i * 4 + 1] = image.data[i * 4 + 2] = value;
+    image.data[i * 4 + 3] = 255;
   }
-  const difference = meanPixelDifference(history.get(mirrored), current);
-  history.set(mirrored, current);
-  return difference;
+  context.putImageData(image, 0, 0);
+  try {
+    return window.OCRAD(ocrCrop, { scale: 4, filters: ['upper_num_only'] }).trim().toUpperCase();
+  } catch {
+    return null;
+  }
 }
 
-function recognizePreparedCard() {
-  const suitCtx = suitCrop.getContext('2d', { willReadFrequently: true });
-  const suit = identifySuit(suitCtx, 0, 0, suitCrop.width, suitCrop.height);
-  if (!suit) return null;
-
-  let rank = identifyRank(rankCrop)?.rank ?? null;
-  if (!rank) {
-    try {
-      ocrCrop.getContext('2d').drawImage(rankCrop, 0, 0);
-      rank = normalizeRank(window.OCRAD(ocrCrop, { scale: 4, filters: ['upper_num_only'] }));
-    } catch {}
-  }
-  if (!rank || !ranks.includes(rank)) return null;
-  return { rank, suit: suit.suit, score: suit.score };
+function readRank(mask, glyph) {
+  const narrow = glyph.w < glyph.h * .5;
+  const matches = narrow
+    ? matchShapes(stretchRankWidth(mask), stretchedRanks, ranks)
+    : matchShapes(mask, rankCanvases, ranks);
+  const [best, next] = matches;
+  if (glyph.double && best.label !== '10') return null;
+  const gap = best.score - next.score;
+  const strongShape = glyph.double
+    ? best.score >= .53 && gap >= .105
+    : best.score >= .60 && gap >= .07;
+  const matchesText = best.score >= .49 && gap >= .02 && !strongShape && readRankText(mask) === best.label;
+  if (!strongShape && !matchesText) return null;
+  // A pip from the main artwork can sit directly over another pip in the same suit.
+  // Compare the first shape against both alphabets before treating it as a rank.
+  const [pip] = matchShapes(mask, suitCanvases, glyph.red ? ['D', 'H'] : ['S', 'C']);
+  return pip.score > Math.max(.66, best.score + .055) ? null : best;
 }
 
-function readCardView(frame, history, mirrored) {
-  if (!prepareCardCrops(frame, mirrored)) {
-    history.delete(mirrored);
-    return { card: null, motion: Infinity, paper: 0 };
+function readSuit(mask, red) {
+  const matches = matchShapes(mask, suitCanvases, red ? ['D', 'H'] : ['S', 'C']);
+  const [best, next] = matches;
+  return best.score >= .59 && best.score - next.score >= (red ? .044 : .016) ? best : null;
+}
+
+function readCorner(ink, width, { rank, suit, leftEdge, rightEdge, upperEdge }) {
+  const sideEdge = Math.min(leftEdge, rightEdge);
+  if (Math.min(sideEdge, upperEdge) > .5) return null;
+  const suitMask = glyphMask(ink, width, suit, false);
+  const bestSuit = readSuit(suitMask, suit.red);
+  if (!bestSuit) return null;
+
+  // Near a distinct left or right card edge, we know which way the index was printed.
+  let bestRank;
+  const edgeDifference = leftEdge - rightEdge;
+  if (Math.abs(edgeDifference) >= .28) {
+    bestRank = readRank(glyphMask(ink, width, rank, edgeDifference > 0), rank);
+  } else {
+    const normal = readRank(glyphMask(ink, width, rank, false), rank);
+    const mirrored = readRank(glyphMask(ink, width, rank, true), rank);
+    if (normal && mirrored && normal.label !== mirrored.label && Math.abs(normal.score - mirrored.score) < .1) return null;
+    bestRank = normal && (!mirrored || normal.score >= mirrored.score) ? normal : mirrored;
   }
-  const motion = motionScore(history, mirrored);
-  const paper = Math.min(paperRatio(rankCrop), paperRatio(suitCrop));
-  const card = paper >= .55 ? recognizePreparedCard() : null;
-  return { card, motion, paper };
+  if (!bestRank) return null;
+  if ((sideEdge > .4 || (upperEdge > .6 && sideEdge > .15)) && (bestRank.score < .78 || bestSuit.score < .78)) return null;
+  return { rank: bestRank.label, suit: bestSuit.label, score: (bestRank.score + bestSuit.score) / 2 };
+}
+
+function cornerMotion(previous, current, { width, height }, { rank, suit }) {
+  if (previous?.length !== current.length) return Infinity;
+  const margin = Math.max(2, Math.round(rank.h * .15));
+  const left = Math.max(0, Math.min(rank.x, suit.x) - margin);
+  const right = Math.min(width - 1, Math.max(rank.right, suit.right) + margin);
+  let difference = 0, samples = 0;
+  for (let y = Math.max(0, rank.y - margin); y <= Math.min(height - 1, suit.bottom + margin); y++) {
+    for (let x = left; x <= right; x++) {
+      const i = y * width + x;
+      difference += Math.abs(previous[i] - current[i]);
+      samples++;
+    }
+  }
+  return samples ? difference / samples : Infinity;
 }
 
 export function scanCardFrame(frame, history) {
-  const normal = readCardView(frame, history, false);
-  const mirrored = readCardView(frame, history, true);
-  const card = agreeOnCard(normal.card, mirrored.card);
-  const eligible = card
-    ? [normal, mirrored].filter(view => view.card)
-    : [normal, mirrored].filter(view => view.paper >= .55);
+  const { width, height } = frame;
+  const context = frame.getContext('2d', { willReadFrequently: true });
+  const { corners, ink, gray, paper } = findCardCorners(context.getImageData(0, 0, width, height));
+  const previous = history.get(width);
+  history.clear();
+  history.set(width, gray);
+
+  let best = null;
+  for (const corner of corners) {
+    const card = readCorner(ink, width, corner);
+    if (!card) continue;
+    const score = corner.quality + card.score * .45;
+    if (!best || score > best.score) best = { card, corner, score };
+  }
   return {
-    card,
-    motion: Math.min(...eligible.map(view => view.motion)),
-    paper: Math.max(normal.paper, mirrored.paper),
+    card: best?.card ?? null,
+    motion: best ? cornerMotion(previous, gray, frame, best.corner) : 0,
+    paper,
   };
 }
 
@@ -403,9 +324,6 @@ async function start() {
     const video = $('assistant-video');
     video.srcObject = stream;
     await video.play();
-    const dimension = 480 / Math.max(video.videoWidth || 4, video.videoHeight || 3);
-    capture.width = Math.max(1, Math.round(video.videoWidth * dimension));
-    capture.height = Math.max(1, Math.round(video.videoHeight * dimension));
     if (fullscreenRequest) await fullscreenRequest.catch(() => {});
     try { await screen.orientation?.lock(orientation); } catch {}
     const screenHeld = await requestWakeLock();
@@ -436,8 +354,18 @@ function scanLoop() {
   if (!scanning) return;
   const now = performance.now();
   const video = $('assistant-video');
-  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.currentTime !== lastVideoTime) {
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0 &&
+      video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
+    const scale = Math.min(1, 480 / Math.max(video.videoWidth, video.videoHeight));
+    const width = Math.max(1, Math.round(video.videoWidth * scale));
+    const height = Math.max(1, Math.round(video.videoHeight * scale));
+    if (capture.width !== width || capture.height !== height) {
+      capture.width = width;
+      capture.height = height;
+      previousScanPixels.clear();
+      stableCardGate.reset();
+    }
     const ctx = capture.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(video, 0, 0, capture.width, capture.height);
     const { card: found, motion: stillness, paper } = scanCardFrame(capture, previousScanPixels);
@@ -448,7 +376,7 @@ function scanLoop() {
     if (accepted) {
       updateStatus('Đã nhận diện', 'Card recognized');
     } else {
-      if (paper < .55) updateStatus('Đưa góc lá bài sáng vào giữa camera', 'Center the light card corner in the camera view');
+      if (!paper) updateStatus('Đưa cả số và chất ở góc bài vào khung hình', 'Bring both the corner rank and suit into view');
       else if (stillness > 7 || found) updateStatus('Giữ lá bài yên khoảng 0,2 giây', 'Hold the card still for about 0.2 seconds');
       else updateStatus('Đọc hạng và chất ở góc bài', 'Reading rank and suit from the card corner');
     }

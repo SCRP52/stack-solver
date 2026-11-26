@@ -708,7 +708,7 @@ function readRoute(left, right) {
 // Search routes that prepare four 13-card blocks, use whole-deck faros, then
 // finish with a reversal, partial weave or deal, and cut. This applies to any
 // pair of decks and produces candidates checked by the same replay as BFS.
-function findStructured(start, target, moves, expired) {
+function findStructured(start, target, moves, expired, offer, enough) {
   const blockMoves = moves.list.filter(move => {
     const p = move.params;
     if (move.kind === 'multi-cut') return p.splits.every(split => split % 13 === 0);
@@ -720,61 +720,62 @@ function findStructured(start, target, moves, expired) {
 
   const suffixes = new Map();
   function addSuffix(state, route) {
-    const old = suffixes.get(state);
-    if (!old || route.length < old.length) suffixes.set(state, route);
+    const tails = suffixes.get(state);
+    if (!tails) suffixes.set(state, [route]);
+    else if (tails.length < 3) tails.push(route);
   }
 
   const lastCuts = [...new Set(moves.cuts.values())];
   for (const cut of [null, ...lastCuts]) {
-    if (expired()) return null;
+    if (expired()) return;
     const beforeCut = cut ? cut.undo(target) : target;
     const trail = cut ? [cut] : [];
     addSuffix(beforeCut, trail);
     for (const move of finishingMoves) addSuffix(move.undo(beforeCut), [move, ...trail]);
   }
 
-  let best = null;
   let frontier = [{ state: start, route: [] }];
-  const seen = new Set([start]);
+  const seen = new Map([[start, { depth: 0, count: 1 }]]);
 
   function join(state, route, reverse) {
-    let tail = suffixes.get(state);
-    if (!tail && (!best || route.length + (reverse ? 2 : 1) < best.length)) {
-      const last = directExpandedMove(state, target, moves);
-      if (last) tail = [last];
+    const prefix = reverse ? route.concat(reverse) : route;
+    const tails = suffixes.get(state);
+    if (tails) {
+      for (const tail of tails) offer(prefix.concat(tail));
+    } else if (moves.wideDeal || moves.wideMultiCut) {
+      const last = directExpandedMove(state, target, moves, false);
+      if (last) offer(prefix.concat(last));
     }
-    if (!tail) return;
-    const cost = route.length + (reverse ? 1 : 0) + tail.length;
-    if (!best || cost < best.length) best = route.concat(reverse ? [reverse, ...tail] : tail);
   }
 
   function weave(state, route, count) {
-    if (expired() || (best && route.length >= best.length)) return;
+    if (expired() || enough(route.length - 1)) return;
     join(state, route);
-    if (!best || route.length + 1 < best.length) {
+    if (!enough(route.length)) {
       for (const reverse of reversals) join(reverse.apply(state), route, reverse);
     }
-    if (count < 4) {
+    if (count < 5) {
       for (const faro of faros) weave(faro.apply(state), route.concat(faro), count + 1);
     }
   }
 
-  for (let depth = 0; depth <= 4 && frontier.length; depth++) {
+  for (let depth = 0; depth <= 5 && frontier.length; depth++) {
     const next = [];
     for (const { state, route } of frontier) {
-      if (expired()) return best;
+      if (expired()) return;
       weave(state, route, 0);
-      if (depth === 4 || (best && depth + 1 >= best.length)) continue;
+      if (depth === 5 || enough(depth)) continue;
       for (const move of blockMoves) {
         const neighbor = move.apply(state);
-        if (seen.has(neighbor)) continue;
-        seen.add(neighbor);
+        const visit = seen.get(neighbor);
+        if (visit && (visit.depth <= depth || visit.count === 3)) continue;
+        if (visit) visit.count++;
+        else seen.set(neighbor, { depth: depth + 1, count: 1 });
         next.push({ state: neighbor, route: route.concat(move) });
       }
     }
     frontier = next;
   }
-  return best;
 }
 
 function findExact(start, target, moves, limits, report, clock, getBest, offer, enough) {
@@ -940,6 +941,8 @@ export function solve(start, requested, options, limits, notify = () => {}) {
   const choices = [];
   const maxChoices = 5;
   const enough = maxCost => choices.length === maxChoices && choices.at(-1).score <= maxCost;
+  const suggested = () => choices.filter(choice => choice.route === best ||
+    choice.culls <= choices[0].culls + 2 || choice.score <= choices[0].score + 6);
 
   function report(phase, depth, count, force = false) {
     const elapsed = performance.now() - started;
@@ -954,7 +957,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
     if (!best || (!force && now - lastCandidate < 175)) return;
     lastCandidate = now;
     notify({ type: 'candidate', shortestLength: best.length, practicalScore: choices[0].score,
-      steps: choices[0].steps, routes: choices.map(choice => choice.steps) });
+      steps: choices[0].steps, routes: suggested().map(choice => choice.steps) });
   }
 
   function offer(route, announce = false) {
@@ -1000,10 +1003,10 @@ export function solve(start, requested, options, limits, notify = () => {}) {
     publishCandidate(true);
   }
   if (!alreadyMatched && !clock.expired()) {
-    if (!best || best.length > provedThrough + 1 || choices.length < maxChoices) {
+    if (!best || best.length > provedThrough + 1 || !enough(best.length + 1)) {
       report('structured', provedThrough, checked, true);
       const structuredUntil = started + Math.min(8, limits.seconds * 0.6) * 1000;
-      offer(findStructured(start, target, moves, () => clock.expired() || performance.now() >= structuredUntil));
+      findStructured(start, target, moves, () => clock.expired() || performance.now() >= structuredUntil, offer, enough);
       report('practical', provedThrough, checked, true);
       const practicalUntil = performance.now() + Math.min(required ? 4 : 2, limits.seconds * 0.22) * 1000;
       searchPractical(start, target, required, moves, () => clock.expired() || performance.now() >= practicalUntil, offer, enough);
@@ -1062,7 +1065,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
   const optimal = best !== null && provedThrough >= best.length - 1;
   return { type: 'done', optimal, provedThrough, checked, attempts, seconds: (performance.now() - started) / 1000,
     shortestLength: best?.length ?? null, practicalScore: choices[0]?.score ?? null,
-    steps: choices[0]?.steps ?? null, routes: choices.map(choice => choice.steps) };
+    steps: choices[0]?.steps ?? null, routes: suggested().map(choice => choice.steps) };
 }
 
 export function demoStack() {

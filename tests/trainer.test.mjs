@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { presets } from '../presets.mjs';
 import { advanced, basic, buildQuestion, grade, questionSet, stackModel } from '../drills.mjs';
-import { cardLabel, library, saveStack, stackOrder } from '../stack-library.mjs';
+import { library, saveStack, stackOrder } from '../stack-library.mjs';
 import { readProgress, saveProgress, slowCards, summarize, weakCards } from '../trainer-progress.mjs';
 import { drillCopy } from '../trainer-copy.mjs';
 import { parseCards, parsePositions, solve } from '../solver.mjs';
@@ -70,38 +70,20 @@ test('distance, offset and bottom count are distinct', () => {
   assert.equal(buildQuestion(model, 'bottom-card', 0).answer[0], cards[0]);
 });
 
-test('Offset Order shuffles all unique bottom and position combinations without giving away answers', () => {
-  const { cards } = presets[4];
-  const model = stackModel(cards);
-  const ordered = questionSet(model, ['offset-order'], { sequential: true });
-  const shuffled = questionSet(model, ['offset-order'], { random: () => 0 });
-  const keys = prompts => prompts.map(prompt => JSON.stringify(prompt.args));
-  const orderedKeys = keys(ordered);
-  const shuffledKeys = keys(shuffled);
-  assert.equal(ordered.length, 52 * 51);
-  assert.equal(new Set(shuffledKeys).size, ordered.length);
-  assert.notDeepEqual(shuffledKeys, orderedKeys);
-  assert.deepEqual(new Set(shuffledKeys), new Set(orderedKeys));
-  const byLabel = new Map(cards.map(card => [cardLabel(card), card]));
-  for (const { args: [bottomLabel, position], answer: [card] } of shuffled) {
-    const bottom = byLabel.get(bottomLabel);
-    const split = cards.indexOf(bottom) + 1;
-    const rotated = cards.slice(split).concat(cards.slice(0, split));
-    assert.ok(position >= 1 && position <= 51);
-    assert.equal(card, rotated[position - 1]);
-    assert.notEqual(card, bottom);
-  }
-});
-
 test('Quartet and Mate match the actual rank, suit and relative order', () => {
   const { cards } = presets[4];
   const model = stackModel(cards);
   const index = cards.indexOf('7H');
   const inOrder = cards.filter(card => /^7/.test(card));
   assert.deepEqual(buildQuestion(model, 'quartet-order', index).answer, inOrder);
-  assert.deepEqual(buildQuestion(model, 'quartet-positions', index).answer, ['7S', '7H', '7C', '7D'].map(card => cards.indexOf(card) + 1));
+  const quartetPositions = buildQuestion(model, 'quartet-positions', index);
+  assert.deepEqual(quartetPositions.answer, inOrder.map(card => cards.indexOf(card) + 1));
+  assert.equal(grade(quartetPositions, quartetPositions.answer.map(String).reverse()), true);
+  assert.equal(grade(quartetPositions, Array(4).fill(String(index + 1))), false);
   const relative = cards.slice(index).concat(cards.slice(0, index));
-  assert.deepEqual(buildQuestion(model, 'relative-quartet', index).answer, ['7S', '7C', '7D'].map(card => relative.indexOf(card) + 1));
+  const relativeQuartet = buildQuestion(model, 'relative-quartet', index);
+  assert.deepEqual(relativeQuartet.answer, relative.flatMap((card, i) => card !== '7H' && card.startsWith('7') ? [i + 1] : []));
+  assert.equal(grade(relativeQuartet, relativeQuartet.answer.map(String).reverse()), true);
   assert.equal(buildQuestion(model, 'mate-position', index).answer[0], cards.indexOf('7D') + 1);
   const from = inOrder.indexOf('7H');
   const nextRanks = inOrder.slice(from).concat(inOrder.slice(0, from));
@@ -128,8 +110,14 @@ test('every supported drill generates distinct prompts and grades the generated 
 test('Missing Card accepts either order and requires the full set of distinct answers', () => {
   const { cards } = presets[4];
   const model = stackModel(cards);
-  const q = buildQuestion(model, 'shuffled-missing', 51, 6);
-  assert.deepEqual([...q.shown, ...q.answer].sort(), cards.slice(45, 52).sort());
+  const pool = questionSet(model, advanced.missing, { random: () => 0.99 });
+  assert.equal(pool.length, 46 * (7 + 21));
+  for (const { args: [start, end], shown, answer } of pool) {
+    const segment = cards.slice(start - 1, end);
+    assert.deepEqual([...shown, ...answer].sort(), [...segment].sort());
+    assert.notDeepEqual(shown, segment.filter(card => !answer.includes(card)));
+  }
+  const q = buildQuestion(model, 'multiple-missing', 51, 6);
   assert.equal(grade(q, q.answer.slice().reverse()), true);
   assert.equal(grade(q, [q.answer[0], q.answer[0]]), false);
   assert.equal(grade(q, [q.answer[0]]), null);

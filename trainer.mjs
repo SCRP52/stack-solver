@@ -7,6 +7,11 @@ import { activeStackKey, readProgress, saveProgress, slowCards, summarize, weakC
 const $ = id => document.getElementById(id);
 const all = selector => [...document.querySelectorAll(selector)];
 const basicGroups = { position: basic.slice(0, 2), neighbour: basic.slice(2) };
+const combinedDrills = {
+  'quartet-numbers': { label: ['Tứ quý chỉ nhớ số', 'Quartet by position only'], skills: ['quartet-positions', 'relative-quartet'] },
+  'count-steps': { label: ['Đếm số bước', 'Count steps'], skills: ['forward-distance', 'backward-distance'] },
+  'find-by-steps': { label: ['Tìm lá theo số bước', 'Find a card by steps'], skills: ['forward-offset', 'backward-offset'] },
+};
 const localCopy = ['data-en', 'data-en-aria'].flatMap(key => all(`[${key}]`).map(node => ({
   node, attribute: key.endsWith('-aria') ? 'aria-label' : null, en: node.getAttribute(key), vi: key.endsWith('-aria') ? node.getAttribute('aria-label') : node.textContent,
 })));
@@ -129,7 +134,7 @@ function currentSkills() {
   const groups = activeGroups();
   if (!value || value === 'all') return Object.values(groups).flat();
   if (value.startsWith('group:')) return groups[value.slice(6)];
-  return [value];
+  return combinedDrills[value]?.skills ?? [value];
 }
 
 function fillSkills(value = 'all') {
@@ -140,7 +145,11 @@ function fillSkills(value = 'all') {
     const group = element('optgroup');
     group.label = name;
     group.append(new Option(t(`Trộn ${name}`, `Mix ${name}`), `group:${key}`));
-    for (const kind of skills) group.append(new Option(drillName(kind), kind));
+    const choices = key === 'distance' ? ['count-steps', 'find-by-steps'] : key === 'quartet' ? ['quartet-numbers', ...skills] : skills;
+    for (const kind of choices) {
+      const combined = combinedDrills[kind];
+      group.append(new Option(combined ? t(...combined.label) : drillName(kind), kind));
+    }
     selector.append(group);
   }
   selector.value = [...selector.options].some(option => option.value === value) ? value : 'all';
@@ -251,8 +260,9 @@ function showQuestion() {
   $('answer-error').hidden = true;
   if (!run.self) {
     const numeric = typeof prompt.answer[0] === 'number';
-    const labels = prompt.labels.length ? prompt.labels : numeric && prompt.answer.length > 1
-      ? prompt.answer.map((_, i) => t(`Chặng ${i + 1}`, `Gap ${i + 1}`)) : [t('Đáp án', 'Answer')];
+    const labels = numeric && prompt.answer.length > 1
+      ? prompt.answer.map((_, i) => prompt.unordered ? t(`Ô ${i + 1}`, `Entry ${i + 1}`) : t(`Chặng ${i + 1}`, `Gap ${i + 1}`))
+      : [t('Đáp án', 'Answer')];
     $('answer-fields').replaceChildren(...labels.map((heading, i) => {
       const field = element('div');
       const label = element('label', heading);

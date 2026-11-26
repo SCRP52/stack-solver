@@ -2,20 +2,22 @@ import { cardCode, deckLength as size, cardLabel } from './stack-library.mjs';
 
 export const basic = ['card-position', 'position-card', 'previous', 'next'];
 export const advanced = {
-  acaan: ['cut-count', 'cut-card', 'offset-order'],
+  acaan: ['cut-count', 'cut-card'],
   quartet: ['quartet-positions', 'quartet-order', 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank'],
   mate: ['mate-position', 'mate-distance', 'relative-mate'],
   distance: ['forward-distance', 'backward-distance', 'forward-offset', 'backward-offset'],
   relative: ['relative-position', 'bottom-position', 'bottom-card'],
-  missing: ['single-missing', 'multiple-missing', 'shuffled-missing'],
+  missing: ['single-missing', 'multiple-missing'],
 };
 
 const mod = value => (value % size + size) % size;
 const rank = card => card.slice(0, -1);
 const suit = card => card.at(-1);
 const mateSuit = { S: 'C', C: 'S', H: 'D', D: 'H' };
-const quartetSuits = ['S', 'H', 'C', 'D'];
 const positions = Array.from({ length: size }, (_, index) => index + 1);
+const segmentSize = 7;
+const missingPairs = Array.from({ length: segmentSize }, (_, left) =>
+  Array.from({ length: segmentSize - left - 1 }, (_, gap) => [left, left + gap + 1])).flat();
 
 export function stackModel(cards) {
   if (cards.length !== size || new Set(cards).size !== size || cards.some(card => cardCode(card) !== card)) {
@@ -34,11 +36,7 @@ export function forwardDistance(fromSlot, toSlot) { return mod(toSlot - fromSlot
 export function positionAfterCut(slot, cutCount) { return mod(slot - cutCount) + 1; }
 export function cutCountFor(position, wanted) { return mod(position - wanted); }
 
-function question(kind, args, answer, focus, labels = [], unordered = false, shown = []) {
-  return { kind, args, answer, focus, labels, unordered, shown };
-}
-
-export function buildQuestion(model, skill, index, variant = 0) {
+export function buildQuestion(model, skill, index, variant = 0, random = Math.random) {
   const { cards, at, slot, quartet } = model;
   const card = at(index);
   const face = cardLabel(card);
@@ -50,8 +48,8 @@ export function buildQuestion(model, skill, index, variant = 0) {
   const number = positions[mod(variant + index * 7)];
   const bottom = other;
   const cut = otherIndex + 1;
-  const ask = (args, answer, focus = [card], labels, unordered, shown) =>
-    question(skill, args, Array.isArray(answer) ? answer : [answer], focus, labels, unordered, shown);
+  const ask = (args, answer, focus = [card], { unordered = false, shown = [] } = {}) =>
+    ({ kind: skill, args, answer: Array.isArray(answer) ? answer : [answer], focus, unordered, shown });
 
   switch (skill) {
     case 'card-position': return ask([face], fromTop);
@@ -65,8 +63,8 @@ export function buildQuestion(model, skill, index, variant = 0) {
       return ask([face, number], at(count - 1));
     }
     case 'quartet-positions': {
-      const ordered = quartetSuits.map(mark => cardRank + mark);
-      return ask([cardRank], ordered.map(member => slot(member) + 1), ordered, ordered.map(cardLabel));
+      const group = quartet.get(cardRank);
+      return ask([cardRank], group.map(member => slot(member) + 1), group, { unordered: true });
     }
     case 'quartet-order': return ask([cardRank], quartet.get(cardRank), quartet.get(cardRank));
     case 'quartet-distances': {
@@ -75,8 +73,10 @@ export function buildQuestion(model, skill, index, variant = 0) {
       return ask([face], ordered.slice(1).map((member, i) => forwardDistance(slot(ordered[i]), slot(member))), ordered);
     }
     case 'relative-quartet': {
-      const others = quartetSuits.map(mark => cardRank + mark).filter(member => member !== card);
-      return ask([face], others.map(member => positionAfterCut(slot(member), index)), [card, ...others], others.map(cardLabel));
+      const group = quartet.get(cardRank);
+      const others = group.filter(member => member !== card);
+      const positions = others.map(member => positionAfterCut(slot(member), index)).sort((a, b) => a - b);
+      return ask([face], positions, group, { unordered: true });
     }
     case 'next-rank':
     case 'previous-rank': {
@@ -97,25 +97,18 @@ export function buildQuestion(model, skill, index, variant = 0) {
     case 'forward-offset': return ask([face, variant + 1], other, [card, other]);
     case 'backward-offset': return ask([face, variant + 1], at(index - variant - 1), [card, at(index - variant - 1)]);
     case 'relative-position': return ask([cardLabel(bottom), face], positionAfterCut(index, cut), [card, bottom]);
-    case 'offset-order': {
-      if (fromTop === size) return null;
-      const bottomCard = at(variant);
-      const answer = at(variant + fromTop);
-      return ask([cardLabel(bottomCard), fromTop], answer, [bottomCard, answer]);
-    }
     case 'bottom-position': return ask([face], fromBottom);
     case 'bottom-card': return ask([fromBottom], card);
     case 'single-missing':
-    case 'multiple-missing':
-    case 'shuffled-missing': {
-      const start = Math.min(index, size - 7);
-      const segment = cards.slice(start, start + 7);
-      const first = (index - start + variant) % 7;
-      const gaps = skill === 'single-missing' ? [first] : [first, (first + 3) % 7];
+    case 'multiple-missing': {
+      const start = Math.min(index, size - segmentSize);
+      const segment = cards.slice(start, start + segmentSize);
+      const gaps = skill === 'single-missing' ? [variant] : missingPairs[variant];
       const missing = gaps.map(i => segment[i]);
-      let shown = segment.filter((_, i) => !gaps.includes(i));
-      if (skill === 'shuffled-missing') shown = [shown[2], shown[0], shown[4], shown[1], shown[3]];
-      return ask([start + 1, start + segment.length, missing.length], missing, missing, [], true, shown);
+      const visible = segment.filter((_, i) => !gaps.includes(i));
+      const shown = shuffle([...visible], random);
+      if (shown.every((card, i) => card === visible[i])) shown.push(shown.shift());
+      return ask([start + 1, start + segment.length, missing.length], missing, missing, { unordered: true, shown });
     }
     default: throw new RangeError(`Unknown drill ${skill}`);
   }
@@ -131,13 +124,14 @@ function shuffle(items, random) {
 
 const rankOnly = new Set(['quartet-positions', 'quartet-order']);
 const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card']);
-const fullVariants = new Set(['cut-count', 'cut-card', 'offset-order']);
+const fullVariants = new Set(['cut-count', 'cut-card']);
+const missingVariants = { 'single-missing': segmentSize, 'multiple-missing': missingPairs.length };
 
 export function questionSet(model, skills, { start = 1, end = size, random = Math.random, sequential = false, eligible = () => true } = {}) {
   const unique = new Set();
   const buckets = skills.map(skill => {
     const seenRanks = new Set();
-    const variants = fixed.has(skill) ? 1 : fullVariants.has(skill) ? size : advanced.missing.includes(skill) ? 7 : size - 1;
+    const variants = fixed.has(skill) ? 1 : fullVariants.has(skill) ? size : missingVariants[skill] ?? size - 1;
     const items = [];
     for (let index = start - 1; index < end; index++) {
       if (start !== 1 || end !== size) {
@@ -149,9 +143,9 @@ export function questionSet(model, skills, { start = 1, end = size, random = Mat
         seenRanks.add(key);
       }
       for (let variant = 0; variant < variants; variant++) {
-        const prompt = buildQuestion(model, skill, index, variant);
+        const prompt = buildQuestion(model, skill, index, variant, random);
         if (!prompt || !eligible(prompt)) continue;
-        const key = JSON.stringify([prompt.kind, prompt.args, prompt.shown]);
+        const key = JSON.stringify([prompt.kind, prompt.args, missingVariants[skill] ? prompt.answer : prompt.shown]);
         if (unique.has(key)) continue;
         unique.add(key);
         items.push(prompt);

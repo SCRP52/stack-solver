@@ -5,11 +5,10 @@ export const drillCopy = {
   next: ['Lá liền sau', 'Next Card', 'Lá nào ngay sau {0}?', 'Which card is immediately after {0}?'],
   'cut-count': ['Số lá cần cắt', 'Cut Count', 'Cắt bao nhiêu lá từ trên xuống đáy để {0} về vị trí {1}?', 'How many cards must you cut from top to bottom to move {0} to position {1}?'],
   'cut-card': ['Lá tại điểm cắt', 'Cut Card', 'Cắt ngay sau lá nào để {0} về vị trí {1}? Lá cần nhập sẽ trở thành lá đáy.', 'Cut immediately after which card to move {0} to position {1}? Enter the new bottom card.'],
-  'offset-order': ['Offset Order', 'Offset Order', 'Đáy hiện tại là {0}. Lá ở vị trí {1} tính từ trên là gì?', 'The current bottom card is {0}. Which card is at position {1} from the top?'],
-  'quartet-positions': ['Vị trí tứ quý', 'Quartet Positions', 'Bốn lá {0} nằm ở vị trí nào? Điền theo từng chất.', 'Where are the four {0}s? Enter one position per suit.'],
+  'quartet-positions': ['Vị trí tứ quý', 'Quartet Positions', 'Bốn lá {0} nằm ở những vị trí nào? Nhập bốn số theo thứ tự bất kỳ.', 'Where are the four {0}s? Enter the four positions in any order.'],
   'quartet-order': ['Thứ tự tứ quý', 'Quartet Order', 'Nhập bốn lá {0} theo thứ tự từ trên xuống.', 'Enter the four {0}s in order from top to bottom.'],
   'quartet-distances': ['Khoảng cách tứ quý', 'Quartet Distances', 'Từ {0}, đi xuôi theo vòng stack qua ba lá cùng giá trị. Ba chặng liên tiếp cách mấy vị trí?', 'Starting at {0}, go forward around the stack through the three other cards of its rank. How many positions are in each of the three consecutive gaps?'],
-  'relative-quartet': ['Tứ quý sau khi cắt', 'Relative Quartet', 'Đưa {0} lên đầu. Ba lá cùng giá trị còn lại ở vị trí nào?', 'Cut {0} to the top. Where are the other three cards of its rank?'],
+  'relative-quartet': ['Tứ quý sau khi cắt', 'Relative Quartet', 'Đưa {0} lên đầu. Ba lá cùng giá trị còn lại ở vị trí nào? Nhập ba số theo thứ tự bất kỳ.', 'Cut {0} to the top. Enter the positions of the other three cards of its rank in any order.'],
   'next-rank': ['Lá cùng giá trị kế tiếp', 'Next Same Rank', 'Đi xuôi theo vòng stack, lá cùng giá trị kế tiếp của {0} là lá nào?', 'Going forward around the stack, which card of the same rank comes next after {0}?'],
   'previous-rank': ['Lá cùng giá trị phía trước', 'Previous Same Rank', 'Đi ngược theo vòng stack, lá cùng giá trị gần nhất từ {0} là lá nào?', 'Going backward around the stack, which card of the same rank is nearest to {0}?'],
   'mate-position': ['Vị trí Mate', 'Mate Position', 'Mate của {0} ở vị trí nào?', 'What is the position of the mate of {0}?'],
@@ -22,9 +21,8 @@ export const drillCopy = {
   'relative-position': ['Vị trí sau khi cắt', 'Relative Position', 'Đáy hiện tại là {0}. {1} ở vị trí nào tính từ trên?', 'The current bottom card is {0}. Where is {1}, counting from the top?'],
   'bottom-position': ['Vị trí tính từ đáy', 'Bottom Position', 'Tính từ đáy stack, {0} là lá thứ mấy?', 'Counting from the bottom of the stack, where is {0}?'],
   'bottom-card': ['Lá tính từ đáy', 'Bottom Card', 'Lá thứ {0} tính từ đáy stack là lá nào?', 'Which card is at position {0} from the bottom?'],
-  'single-missing': ['Thiếu một lá', 'Single Missing', 'Đoạn {0}–{1} đang thiếu lá nào?', 'Which card is missing from positions {0}–{1}?'],
-  'multiple-missing': ['Thiếu nhiều lá', 'Multiple Missing', 'Đoạn {0}–{1} đang thiếu {2} lá nào? Nhập theo thứ tự bất kỳ.', 'Which {2} cards are missing from positions {0}–{1}? Enter them in any order.'],
-  'shuffled-missing': ['Thiếu lá trong đoạn đã xáo', 'Shuffled Missing', 'Đoạn {0}–{1} đã bị trộn. Có {2} lá nào bị thiếu? Nhập theo thứ tự bất kỳ.', 'The cards from positions {0}–{1} are shuffled. Which {2} are missing? Enter them in any order.'],
+  'single-missing': ['Thiếu một lá', 'Single Missing', 'Các lá còn lại trong đoạn {0}–{1} đã được xáo. Thiếu lá nào?', 'The remaining cards from positions {0}–{1} are shuffled. Which card is missing?'],
+  'multiple-missing': ['Thiếu hai lá', 'Two Missing', 'Các lá còn lại trong đoạn {0}–{1} đã được xáo. Thiếu {2} lá nào?', 'The remaining cards from positions {0}–{1} are shuffled. Which {2} cards are missing?'],
 };
 
 export const groupCopy = {

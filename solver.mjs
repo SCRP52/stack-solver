@@ -335,6 +335,14 @@ export function makeMoves(options = defaults) {
 
 const isCull = move => move?.kind === 'cull' || move?.kind === 'reverse-cull';
 const sameCull = (a, b) => isCull(a) && isCull(b);
+const isHeavy = move => isCull(move) || move?.kind === 'multi-cut';
+
+function handlingPenalty(move, neighbor) {
+  let penalty = isHeavy(move) ? 2 : 0;
+  if (move.kind === 'multi-cut' && neighbor?.kind === 'multi-cut') penalty += 2;
+  else if ((isCull(move) && neighbor?.kind === 'cut') || (isCull(neighbor) && move.kind === 'cut')) penalty++;
+  return penalty;
+}
 
 export function replay(start, route) {
   const steps = [];
@@ -602,7 +610,7 @@ function searchPractical(start, target, required, moves, expired, offer, enough,
   const operations = moves.list.filter(move => !isCull(move));
   if (!operations.some(move => move.kind !== 'cut')) return;
   function side(state, wanted, backward) {
-    const root = { state };
+    const root = { state, handling: 0 };
     const weights = Array.from({ length: size }, () => new Uint8Array(size));
     const nextCard = new Uint8Array(size);
     for (const [slot, card] of required ?? [...wanted].map((card, slot) => [slot, card])) {
@@ -639,11 +647,13 @@ function searchPractical(start, target, required, moves, expired, offer, enough,
         if (parent.move?.kind === 'cut' && move.kind === 'cut') continue;
         const state = backward ? move.undo(parent.state) : move.apply(parent.state);
         const match = other.seen?.get(state);
-        const node = { state, parent, move };
+        const handling = parent.handling + handlingPenalty(move, parent.move);
+        const node = { state, parent, move, handling };
         if (match) offer(backward ? readRoute(match, node) : readRoute(node, match));
         if (required?.every(([slot, card]) => state[slot] === card)) { offer(readRoute(node, right.root)); continue; }
-        if (current.seen.has(state) || candidates.has(state)) continue;
-        let score = 0;
+        const prior = candidates.get(state) ?? current.seen.get(state);
+        if (prior && prior.handling <= handling) continue;
+        let score = -6 * handling;
         let previous = index(state.at(-1));
         for (let slot = 0; slot < size; slot++) {
           const card = index(state[slot]);
@@ -1126,9 +1136,9 @@ function shuffle(items) {
   return items;
 }
 
-function varyMove(state, target, moves, listed) {
+function varyMove(state, target, moves, listed, tryPacketCut) {
   const draw = Math.random();
-  if (moves.wideMultiCut && draw < 0.2) {
+  if (moves.wideMultiCut && tryPacketCut && draw < 0.2) {
     const { maxPiles, reorder, allowRotation } = moves.wideMultiCut;
     const count = 2 + Math.floor(Math.random() * (maxPiles - 2));
     const splits = shuffle(positions.slice(1)).slice(0, count).sort((a, b) => a - b);
@@ -1159,21 +1169,19 @@ function varyMove(state, target, moves, listed) {
 }
 
 function routeCost(route) {
-  let culls = 0;
-  let cullCuts = 0;
+  let heavy = 0;
+  let score = route.length;
   let topDown = 0;
   for (let i = 0; i < route.length; i++) {
     const move = route[i];
-    if (!isCull(move)) continue;
-    culls++;
-    if (move.params.direction === 'down') topDown++;
-    if (route[i - 1]?.kind === 'cut') cullCuts++;
-    if (route[i + 1]?.kind === 'cut') cullCuts++;
+    score += handlingPenalty(move, route[i - 1]);
+    if (isHeavy(move)) heavy++;
+    if (isCull(move) && move.params.direction === 'down') topDown++;
   }
-  return { score: route.length + 2 * culls + cullCuts, culls, topDown };
+  return { score, heavy, topDown };
 }
 
-const compareRoutes = (a, b) => a.score - b.score || a.culls - b.culls || a.topDown - b.topDown || a.route.length - b.route.length;
+const compareRoutes = (a, b) => a.score - b.score || a.heavy - b.heavy || a.topDown - b.topDown || a.route.length - b.route.length;
 
 export function solve(start, requested, options, limits, notify = () => {}) {
   const moves = makeMoves(options);
@@ -1196,7 +1204,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
   const maxChoices = 5;
   const enough = maxCost => choices.length === maxChoices && choices.at(-1).score <= maxCost;
   const suggested = () => choices.filter(choice => choice.route === best ||
-    choice.culls <= choices[0].culls + 2 || choice.score <= choices[0].score + 6);
+    choice.heavy <= choices[0].heavy + 2 || choice.score <= choices[0].score + 6);
 
   function report(phase, depth, count, force = false) {
     const elapsed = performance.now() - started;
@@ -1272,7 +1280,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
       const phaseStart = performance.now();
       const quickUntil = phaseStart + Math.min(3, limits.seconds * 0.34) * 1000;
       const extendedUntil = phaseStart + Math.min(6, limits.seconds * 0.57) * 1000;
-      const until = () => choices[0]?.culls === 0 ? extendedUntil : quickUntil;
+      const until = () => choices[0]?.heavy === 0 ? extendedUntil : quickUntil;
       findStructured(start, target, moves, () => clock.expired() || performance.now() >= until(), offer, enough, suggestPackets);
       const packetUntil = performance.now() + Math.min(1.2, limits.seconds * 0.23) * 1000;
       const packetExpired = () => clock.expired() || performance.now() >= packetUntil;
@@ -1296,14 +1304,14 @@ export function solve(start, requested, options, limits, notify = () => {}) {
     }
     if (!clock.expired() && searching()) {
       // Seed a usable route before spending the remaining budget on better joins.
-      offer(buildWithPacketCuts(start, target, moves, clock.expired));
-      offer(buildWithPacketCuts(start, target, moves, clock.expired, true));
+      offer(buildWithRuns(start, target, moves));
       offer(buildWithInsertedCulls(start, target, moves, 0));
       offer(buildWithCulls(start, target, moves, 0));
-      offer(buildWithRuns(start, target, moves));
       report('practical', provedThrough, checked, true);
       const practicalUntil = performance.now() + Math.min(3, limits.seconds * 0.22) * 1000;
       searchPractical(start, target, required, moves, () => clock.expired() || performance.now() >= practicalUntil, offer, enough, beamWidth);
+      offer(buildWithPacketCuts(start, target, moves, clock.expired));
+      offer(buildWithPacketCuts(start, target, moves, clock.expired, true));
       for (let rotation = 1; rotation < size && !clock.expired() && searching(); rotation++) {
         offer(buildWithInsertedCulls(start, target, moves, rotation));
         offer(buildWithCulls(start, target, moves, rotation));
@@ -1312,6 +1320,7 @@ export function solve(start, requested, options, limits, notify = () => {}) {
     publishCandidate(true);
 
     const varied = moves.list.filter(move => !isCull(move));
+    const simpleMoves = varied.filter(move => !isHeavy(move));
     const canVary = varied.some(move => move.kind !== 'cut') || expanded;
     const extraUntil = performance.now() + Math.min(6000, limits.seconds * 300);
     let beamAt = performance.now() + 3500;
@@ -1346,7 +1355,8 @@ export function solve(start, requested, options, limits, notify = () => {}) {
       const prefix = anchor ? savedRoute.slice(0, anchor) : [];
       const length = 1 + (attempts % (splice ? 3 : 7));
       for (let i = 0; i < length; i++) {
-        const move = varyMove(state, target, moves, varied);
+        const tryPacketCut = !simpleMoves.length || (prefix.at(-1)?.kind !== 'multi-cut' && attempts % 3 === 0);
+        const move = varyMove(state, target, moves, tryPacketCut ? varied : simpleMoves, tryPacketCut);
         prefix.push(move);
         state = move.apply(state);
         if (required && matches(state)) break;

@@ -76,6 +76,7 @@ progress { width: 100%; height: 7px; accent-color: var(--accent); margin: 13px 0
 .metrics { display: flex; justify-content: space-between; gap: 9px; font-size: .77rem; color: var(--subtle); font-variant-numeric: tabular-nums; }
 .solution-top { display: flex; justify-content: space-between; align-items: center; margin: 17px 0 12px; }
 .move-total { font-size: 2rem; color: var(--accent); }
+.move-mix { display: block; margin-top: 2px; font-size: .82rem; }
 .study { border: 1px solid var(--line); border-radius: 9px; padding: 8px; }
 .study-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; }
 .study-controls button { font-size: 1.25rem; min-width: 48px; border-color: var(--line); }

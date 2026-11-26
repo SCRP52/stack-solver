@@ -4,6 +4,7 @@ import { ConverterError, message } from './i18n.mjs';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'stack-solver-history-v1';
+const rankVersion = 2;
 const languageKey = 'stack-converter-language';
 const suits = { S: '♠', D: '♦', C: '♣', H: '♥' };
 const families = ['out', 'in', 'near', 'cut', 'run', 'reverse', 'cull', 'deal'];
@@ -64,7 +65,7 @@ function saveSolution() {
   if (!session?.steps) return;
   const records = readHistory();
   const prior = records.find(entry => entry.key === session.key);
-  const usePrior = prior && (prior.practicalScore < session.practicalScore ||
+  const usePrior = prior?.rankVersion === rankVersion && (prior.practicalScore < session.practicalScore ||
     (prior.practicalScore === session.practicalScore && (prior.shortestLength < session.shortestLength ||
       (prior.shortestLength === session.shortestLength && prior.optimal && !session.optimal))));
   const record = usePrior ? { ...prior, name: session.name } : { ...session };
@@ -144,6 +145,7 @@ function updateMultiCut() {
 const isCull = step => step?.kind === 'cull' || step?.kind === 'reverse-cull';
 const cullDirection = step => step.params.direction ?? (step.kind === 'reverse-cull' ? 'up' : 'down');
 const cullCount = steps => steps.filter(isCull).length;
+const packetCutCount = steps => steps.filter(step => step.kind === 'multi-cut' || step.kind === 'triple').length;
 
 function cutGuide(step, before) {
   if (step && ['faro', 'weave'].includes(step.kind) && step.params.split > 0 && step.params.split < before.length) {
@@ -296,12 +298,12 @@ function renderSolution() {
   if (routes.length > 1) {
     const minimum = session.shortestLength ?? Math.min(...routes.map(route => route.length));
     $('route').replaceChildren(...routes.map((route, index) =>
-      new Option(t('routeOption', index + 1, route.length, cullCount(route), route.length === minimum), index)));
+      new Option(t('routeOption', index + 1, route.length, cullCount(route), packetCutCount(route), route.length === minimum), index)));
     $('route').value = currentRoute;
   }
   $('move-total').textContent = steps.length;
   $('move-unit').textContent = language === 'vi' ? 'nước' : steps.length === 1 ? 'move' : 'moves';
-  $('move-culls').textContent = t('cullCount', cullCount(steps));
+  $('move-operations').textContent = t('moveOperations', cullCount(steps), packetCutCount(steps));
   $('copy').disabled = steps.length === 0;
   stepButtons = steps.map((step, index) => {
     const button = document.createElement('button');
@@ -457,7 +459,7 @@ $('solver-form').addEventListener('submit', event => {
     session = { key: JSON.stringify([start, target, options]), name: $('name').value.trim() || t('unnamed'),
       startCards: displayCards(start), targetCards: partial ? null : displayCards(target),
       targetPositions: partial ? target.map(([slot, card]) => [slot, displayCards(card)[0]]) : null,
-      options, steps: null, optimal: false, provedThrough: 0, elapsed: 0 };
+      options, rankVersion, steps: null, optimal: false, provedThrough: 0, elapsed: 0 };
     currentStep = 0;
     currentRoute = 0;
     renderSolution();

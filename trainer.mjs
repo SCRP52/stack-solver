@@ -1,13 +1,18 @@
 import { cardLabel, languageKey, library, libraryKey, readLocal, redCard, saveStack, stackOrder, suits } from './stack-library.mjs';
 import { message } from './i18n.mjs';
 import { ranks } from './solver.mjs';
-import { advanced, answerChoices, basic, grade, questionSet, stackModel } from './drills.mjs';
+import { advanced, answerChoices, basic, grade, questionSet, stackModel } from './drills.mjs?v=33';
 import { drillCopy, drillDetails, groupCopy, groupDetails } from './trainer-copy.mjs?v=30';
+import { beyond, beyondQuestions, isJazzing, isRecallOrder, isSplit, parseSplit, splitDefaults } from './beyond.mjs';
+import { beyondDetails, beyondDrills, beyondGroups, handNames, specialBeyondPrompt } from './beyond-copy.mjs';
+import { findJazzOptions, gradeJazz, jazzLength, jazzPositions } from './jazzing.mjs';
 import { activeStackKey, readProgress, saveProgress, slowCards, summarize, weakCards } from './trainer-progress.mjs';
+import { exportStackCsv, importStackCsv } from './stack-csv.mjs';
 
 const $ = id => document.getElementById(id);
 const all = selector => [...document.querySelectorAll(selector)];
 const basicGroups = { position: basic.slice(0, 2), neighbour: basic.slice(2) };
+const levelMinimum = { basic: 0, advanced: 26, beyond: 52 };
 const combinedDrills = {
   'quartet-numbers': { label: ['Tứ quý chỉ nhớ số', 'Quartet by position only'], skills: ['quartet-positions', 'relative-quartet'] },
   'count-steps': { label: ['Đếm số bước', 'Count steps'], skills: ['forward-distance', 'backward-distance'] },
@@ -20,10 +25,15 @@ const localCopy = ['data-en', 'data-en-aria'].flatMap(key => all(`[${key}]`).map
 let lang = 'vi';
 try { if (localStorage.getItem(languageKey) === 'en') lang = 'en'; } catch {}
 const t = (vi, en) => lang === 'vi' ? vi : en;
-const drillName = kind => t(...drillCopy[kind]);
-const promptText = ({ kind, args }) => t(...drillCopy[kind].slice(2)).replace(/\{(\d+)\}/g, (_, index) => args[index]);
+const drillText = kind => beyondDrills[kind] ?? drillCopy[kind];
+const groupText = key => t(...(beyondGroups[key] ?? groupCopy[key]));
+const drillName = kind => t(...drillText(kind));
+const promptText = question => specialBeyondPrompt(question, lang) ??
+  t(...drillText(question.kind).slice(2)).replace(/\{(\d+)\}/g, (_, index) => question.args[index]);
 const formatAnswer = ({ answer }) => answer.map(item => typeof item === 'number' ? item : cardLabel(item)).join(' · ');
 const suitKeys = [['S', 'Bích', 'Spades'], ['H', 'Cơ', 'Hearts'], ['C', 'Chuồn', 'Clubs'], ['D', 'Rô', 'Diamonds']];
+const isRecallPick = kind => beyond.recall.includes(kind) && !isRecallOrder(kind);
+const hasBoard = kind => kind === 'restack' || isRecallOrder(kind) || isRecallPick(kind) || isSplit(kind) || isJazzing(kind);
 
 let entries = [];
 let selectedStack;
@@ -89,6 +99,11 @@ function range() {
   return { start, end: Math.max(start, clamp('range-end')) };
 }
 
+function rangeLength() {
+  const { start, end } = range();
+  return end - start + 1;
+}
+
 function changeRange(start, end) {
   $('range-start').value = start;
   $('range-end').value = end;
@@ -134,7 +149,7 @@ function renderStudy() {
   $('flip-next').disabled = studyIndex === end;
 }
 
-function activeGroups() { return level === 'basic' ? basicGroups : advanced; }
+function activeGroups() { return level === 'basic' ? basicGroups : level === 'advanced' ? advanced : beyond; }
 
 function currentSkills() {
   const groups = activeGroups();
@@ -144,7 +159,6 @@ function currentSkills() {
 }
 
 function directoryGroups() {
-  if (level === 'beyond') return [];
   return Object.entries(activeGroups()).map(([key, skills]) => {
     const choices = key === 'distance' ? ['count-steps', 'find-by-steps'] : key === 'quartet' ? ['quartet-numbers', ...skills] : skills;
     return { key, choices: skills.length > 1 ? [...choices, `group:${key}`] : choices };
@@ -154,7 +168,7 @@ function directoryGroups() {
 function drillTitle(drill) {
   if (drill === 'all') return t('Trộn tất cả', 'Mix all drills');
   if (drill.startsWith('group:')) {
-    const name = t(...groupCopy[drill.slice(6)]);
+    const name = groupText(drill.slice(6));
     return t(`Trộn ${name}`, `Mix ${name}`);
   }
   const combined = combinedDrills[drill];
@@ -163,7 +177,6 @@ function drillTitle(drill) {
 
 function renderDirectory() {
   const directory = $('practice-drills');
-  if (level === 'beyond') { directory.replaceChildren(); return; }
   const link = (drill, style = '') => {
     const anchor = element('a', undefined, `drill-link ${style}`.trim());
     anchor.href = `#practice/${level}/${drill}/train`;
@@ -173,8 +186,8 @@ function renderDirectory() {
   directory.replaceChildren(link('all', 'drill-mix'), ...directoryGroups().map(({ key, choices }) => {
     const section = element('details', undefined, 'panel drill-group');
     section.open = desktopLayout.matches || level === 'basic' || key === openAdvancedGroup;
-    section.append(element('summary', t(...groupCopy[key])), ...choices.map(drill => link(drill)));
-    if (level === 'advanced' && !desktopLayout.matches) {
+    section.append(element('summary', groupText(key)), ...choices.map(drill => link(drill)));
+    if (level !== 'basic' && !desktopLayout.matches) {
       section.addEventListener('toggle', () => {
         if (!section.isConnected) return;
         if (section.open) {
@@ -217,7 +230,7 @@ function readTrainerRoute() {
   if (view === 'practice') {
     level = nextLevel === 'advanced' || nextLevel === 'beyond' ? nextLevel : 'basic';
     mode = nextMode === 'trial' ? 'trial' : 'train';
-    const known = level !== 'beyond' && (skill === 'all' || directoryGroups().some(group => group.choices.includes(skill)));
+    const known = skill === 'all' || directoryGroups().some(group => group.choices.includes(skill));
     selectedDrill = known ? skill : '';
   } else if (view === 'learn') {
     studyStyle = nextLevel === 'grid' ? 'grid' : 'flip';
@@ -238,40 +251,54 @@ function renderSetup() {
   const beyond = level === 'beyond';
   const trial = mode === 'trial';
   const practice = view === 'practice';
-  const configuring = practice && selectedDrill && !run;
+  const selectedCount = rangeLength();
+  const minimum = levelMinimum[level];
+  const locked = practice && selectedCount < minimum;
+  const configuring = practice && selectedDrill && !locked && !run;
   document.documentElement.classList.toggle('trainer-playing', Boolean(practice && run && !run.finished));
   for (const screen of ['home', 'learn', 'practice', 'assistant', 'settings']) $(screen).hidden = view !== screen;
   $('trainer-back').hidden = view === 'home' || Boolean(practice && run);
   $('trainer-back').href = view === 'settings' ? settingsBack : configuring ? `#practice/${level}` : '#home';
   $('settings-link').hidden = view === 'settings' || Boolean(practice && run);
   mountControl('stack-control', view === 'learn' ? $('learn-stack') : configuring ? $('practice-stack') : $('settings-stack'));
-  mountControl('range-field', configuring && level === 'basic' ? $('practice-range') : $('learn-range'));
-  $('practice-directory').hidden = Boolean(selectedDrill || run);
+  const rangeHost = locked ? 'practice-gate-range' : configuring && level === 'basic' ? 'practice-range' : 'learn-range';
+  mountControl('range-field', $(rangeHost));
+  $('practice-directory').hidden = Boolean(!locked && (selectedDrill || run));
+  $('practice-gate').hidden = !locked;
+  $('practice-drills').hidden = locked;
+  if (locked) {
+    const name = beyond ? 'Beyond' : 'Advanced';
+    $('practice-gate-message').textContent = t(`Chọn vùng ít nhất ${minimum} lá để mở ${name}. Hiện đang chọn ${selectedCount} lá.`,
+      `Select at least ${minimum} cards to open ${name}. Your current range has ${selectedCount} cards.`);
+  }
   $('practice-setup').hidden = !configuring;
   $('practice-session').hidden = !run || run.finished;
   $('trial-results').hidden = !run?.finished;
-  $('beyond').hidden = !beyond;
   for (const button of all('[data-level]')) button.setAttribute('aria-pressed', button.dataset.level === level);
   for (const button of all('[data-mode]')) button.setAttribute('aria-pressed', button.dataset.mode === mode);
   $('advanced-range').hidden = level !== 'advanced';
   $('trial-count-field').hidden = !trial;
   $('order-field').hidden = trial;
   $('focus-field').hidden = trial;
-  if (practice && !selectedDrill) renderDirectory();
+  if (practice && !selectedDrill && !locked) renderDirectory();
   if (configuring) {
     $('practice-drill-title').textContent = drillTitle(selectedDrill);
+    const group = directoryGroups().find(item => item.choices.includes(selectedDrill))?.key;
     $('drill-description').textContent = selectedDrill === 'all'
       ? t('Luyện xen kẽ các bài của cấp này trong cùng một lượt.', 'Practice drills from this level together in one session.')
-      : t(...(selectedDrill.startsWith('group:') ? groupDetails[selectedDrill.slice(6)] : drillDetails[selectedDrill]));
+      : t(...(drillDetails[selectedDrill] ?? beyondDetails[group] ?? groupDetails[group]));
     $('practice-mode-description').textContent = trial
       ? t('Làm đủ số câu đã chọn. Xem điểm và thời gian khi kết thúc.', 'Complete the selected number of questions and see your score and time at the end.')
       : t('Xem đáp án sau từng câu. Có thể dừng bất cứ lúc nào.', 'See the answer after each question. Stop whenever you like.');
     const skills = currentSkills();
-    const restackOnly = skills.every(skill => skill === 'restack');
-    $('answer-mode-field').hidden = trial && restackOnly;
-    $('choice-mode').hidden = $('choice-mode').disabled = restackOnly;
+    const boardOnly = skills.every(hasBoard);
+    $('beyond-split-settings').hidden = !skills.some(isSplit);
+    $('beyond-jazz-settings').hidden = !skills.some(isJazzing);
+    $('poker-hand-setting').hidden = !skills.includes('poker-hand');
+    $('answer-mode-field').hidden = trial && boardOnly;
+    $('choice-mode').hidden = $('choice-mode').disabled = boardOnly;
     $('reveal-mode').hidden = $('reveal-mode').disabled = trial;
-    $('manual-mode').textContent = restackOnly ? t('Chạm để xếp', 'Tap to order') : t('Nhập trên màn hình', 'On-screen input');
+    $('manual-mode').textContent = boardOnly ? t('Chạm để chọn', 'Tap to choose') : t('Nhập trên màn hình', 'On-screen input');
     const selector = $('answer-mode');
     if (selector.selectedOptions[0]?.disabled) selector.value = 'manual';
     const count = skills.reduce((sum, kind) => sum + (progress?.[kind]?.total ?? 0), 0);
@@ -307,13 +334,32 @@ function tick() {
 
 function newRound(event) {
   event.preventDefault();
+  if (!selectedDrill || rangeLength() < levelMinimum[level]) return;
   const trial = mode === 'trial';
   const skills = currentSkills();
   const focus = trial ? 'all' : $('practice-focus').value;
   const focusCards = focus === 'weak' ? weakCards(progress) : focus === 'slow' ? slowCards(progress, skills) : null;
   const options = { ...(level === 'basic' ? range() : {}), sequential: !trial && $('question-order').value === 'sequential',
     eligible: prompt => !focusCards || prompt.focus.some(card => focusCards.has(card)) };
-  const questions = questionSet(model, skills, options);
+  if (skills.some(isSplit)) {
+    try { options.piles = parseSplit($('split-sizes').value, Number($('split-count').value)); }
+    catch {
+      $('beyond-split-settings').open = true;
+      $('practice-status').textContent = t('Nhập đúng số tụ. Mỗi tụ phải có ít nhất một lá và tổng bằng 52.', 'Enter one positive size per pile. All sizes must add up to 52.');
+      return;
+    }
+  }
+  if (skills.some(isJazzing)) {
+    options.first = Number($('jazz-first').value);
+    options.last = Number($('jazz-last').value);
+    options.hand = $('jazz-hand').value;
+    if (!Number.isInteger(options.first) || !Number.isInteger(options.last) || options.first < 1 || options.last > 52 || options.first > options.last) {
+      $('beyond-jazz-settings').open = true;
+      $('practice-status').textContent = t('Chọn Jazzing Range từ 1 đến 52 và để điểm đầu trước hoặc bằng điểm cuối.', 'Use positions 1–52, with the start at or before the end.');
+      return;
+    }
+  }
+  const questions = (level === 'beyond' ? beyondQuestions : questionSet)(model, skills, options);
   if (!questions.length) {
     $('practice-status').textContent = t('Chưa có câu phù hợp với vùng và kiểu ôn này.', 'No questions match this range and review focus yet.');
     return;
@@ -397,11 +443,106 @@ function setupRestack(prompt) {
       }, t(`Ô ${i + 1}, bỏ ${label} khỏi thứ tự`, `Entry ${i + 1}, remove ${label} from your order`));
     });
     $('restack-answer').replaceChildren(...slots);
+    if (selected.length && prompt.answer.length > 26) slots[selected.length - 1].scrollIntoView({ block: 'nearest' });
     $('restack-count').textContent = `${selected.length} / ${prompt.answer.length}`;
     $('submit-answer').disabled = selected.length !== prompt.answer.length;
   }
 
+  $('restack-board').classList.toggle('restack-large', prompt.answer.length > 26);
   $('restack-source').replaceChildren(...source.values());
+  refresh();
+}
+
+function setupBeyondBoard(prompt) {
+  const board = $('beyond-board');
+  board.replaceChildren();
+  const grid = element('div', undefined, 'beyond-grid');
+  board.append(grid);
+  if (isRecallPick(prompt.kind)) {
+    for (const card of prompt.shown) {
+      grid.append(answerButton(cardLabel(card), redCard(card) ? 'answer-red' : '', () => submitAnswer([card])));
+    }
+    return;
+  }
+
+  const submit = $('submit-answer');
+  if (isSplit(prompt.kind)) {
+    const assignments = Array(prompt.shown.length).fill(0);
+    let active = 0;
+    board.prepend(element('p', prompt.piles.map((size, i) => t(`Tụ ${i + 1} · ${size} lá`, `Pile ${i + 1} · ${size} cards`)).join('  /  '), 'hint'));
+    const cardButtons = prompt.shown.map((card, i) => answerButton(undefined, redCard(card) ? 'answer-red' : '', () => {
+      active = i;
+      refresh();
+    }));
+    grid.append(...cardButtons);
+    const piles = element('div', undefined, 'beyond-grid split-piles');
+    for (const [i] of prompt.piles.entries()) {
+      piles.append(answerButton(t(`Tụ ${i + 1}`, `Pile ${i + 1}`), '', () => {
+        assignments[active] = i + 1;
+        const next = assignments.indexOf(0, active + 1);
+        const unassigned = next === -1 ? assignments.indexOf(0) : next;
+        if (unassigned !== -1) active = unassigned;
+        refresh();
+        if (unassigned !== -1) cardButtons[active].scrollIntoView({ block: 'nearest' });
+      }));
+    }
+    board.insertBefore(piles, grid);
+
+    function refresh() {
+      cardButtons.forEach((button, i) => {
+        const label = cardLabel(prompt.shown[i]);
+        const pile = assignments[i];
+        button.textContent = label;
+        button.classList.toggle('assigned', Boolean(pile));
+        const assigned = t(`Tụ ${pile}`, `Pile ${pile}`);
+        if (pile) button.append(element('span', assigned));
+        button.setAttribute('aria-label', pile ? `${label} · ${assigned}` : label);
+        button.setAttribute('aria-pressed', i === active);
+      });
+      submit.disabled = assignments.includes(0);
+    }
+    run.submitBoard = () => submitAnswer(assignments);
+    refresh();
+    return;
+  }
+
+  const positions = new Set();
+  let none = false;
+  const size = jazzLength(prompt.jazz);
+  const bottom = prompt.jazz.cards.length;
+  const count = element('p', undefined, 'hint');
+  count.setAttribute('role', 'status');
+  const noSolution = answerButton(t('Không có phương án', 'No valid hand'), 'no-jazz', () => {
+    none = !none;
+    if (none) positions.clear();
+    refresh();
+  });
+  const buttons = jazzPositions(prompt.jazz).map(position => [position, answerButton(
+    String(position), position === bottom ? 'jazz-bottom' : '', () => {
+      none = false;
+      if (positions.has(position)) positions.delete(position);
+      else if (positions.size < size) positions.add(position);
+      refresh();
+    }, position === bottom ? t(`${bottom} · Đáy`, `${bottom} · Bottom`) : String(position),
+  )]);
+  const bottomButton = buttons.find(([position]) => position === bottom)?.[1];
+  bottomButton?.append(element('small', t('Đáy', 'Bottom')));
+  board.prepend(count);
+  grid.append(...buttons.map(([, button]) => button));
+  board.append(noSolution);
+
+  function refresh() {
+    count.textContent = t(`Đã chọn ${positions.size}/${size} vị trí`, `${positions.size}/${size} positions selected`);
+    for (const [position, button] of buttons) button.setAttribute('aria-pressed', positions.has(position));
+    noSolution.setAttribute('aria-pressed', none);
+    submit.disabled = !none && positions.size !== size;
+  }
+  run.submitBoard = () => {
+    run.submittedAt = performance.now();
+    const answer = none ? null : [...positions].sort((a, b) => a - b);
+    const result = gradeJazz(prompt.jazz, answer);
+    record(result.valid, answer?.map(String) ?? [t('Không có phương án', 'No valid hand')], false, result);
+  };
   refresh();
 }
 
@@ -436,11 +577,12 @@ function setupManual(prompt) {
     const entry = entries[manual.active];
     slots.forEach((button, i) => {
       const value = numeric ? entries[i] : entries[i].rank + (suits[entries[i].suit] ?? '');
-      button.textContent = value || '—';
+      const name = prompt.entryLabels?.[i];
+      button.textContent = name ? `${name} ${value || '—'}` : value || '—';
       const label = !numeric || prompt.unordered ? t(`Ô ${i + 1}`, `Entry ${i + 1}`) : t(`Chặng ${i + 1}`, `Gap ${i + 1}`);
       button.setAttribute('aria-label', `${entries.length === 1 ? t('Đáp án', 'Answer') : label} · ${button.textContent}`);
       button.setAttribute('aria-pressed', i === manual.active);
-      button.classList.toggle('answer-red', !numeric && redCard(entries[i].suit));
+      button.classList.toggle('answer-red', (!numeric && redCard(entries[i].suit)) || ['♥', '♦'].includes(name));
     });
     for (const [value, button] of rankButtons) button.setAttribute('aria-pressed', entry.rank === value);
     for (const [value, button] of suitButtons) button.setAttribute('aria-pressed', entry.suit === value);
@@ -466,7 +608,7 @@ function setupManual(prompt) {
     for (const value of '1234567890') {
       const button = answerButton(value, 'answer-key', () => {
         const previous = entries[manual.active];
-        if (previous.length < 2) entries[manual.active] = previous + value;
+        if (previous.length < (prompt.numericDigits ?? 2)) entries[manual.active] = previous + value;
         refresh();
       });
       if (value === '0') digits.append(remove);
@@ -500,9 +642,13 @@ function setupManual(prompt) {
 function showQuestion() {
   const prompt = run.questions[run.index];
   const isRestack = prompt.kind === 'restack';
-  const restack = isRestack && !run.reveal;
+  const restack = (isRestack || isRecallOrder(prompt.kind)) && !run.reveal;
+  const special = hasBoard(prompt.kind) && !restack && !run.reveal;
+  const pick = isRecallPick(prompt.kind);
   run.answered = false;
   run.restack = null;
+  run.submitBoard = null;
+  run.submittedAt = null;
   $('session-mode').textContent = run.trial ? t('Thi', 'Time Trial') : t('Tập', 'Trainer');
   $('question-count').textContent = run.trial ? `${run.count + 1} / ${run.limit}` : t(`Câu ${run.count + 1}`, `Question ${run.count + 1}`);
   $('trial-time').hidden = !run.trial;
@@ -512,19 +658,21 @@ function showQuestion() {
   $('question-text').textContent = isRestack && run.reveal
     ? t('Nhẩm thứ tự stack của các lá này từ trên xuống.', 'Recall the order of these cards from top to bottom.')
     : promptText(prompt);
-  $('question-cards').replaceChildren(...(restack ? [] : prompt.shown.map(cardFace)));
-  $('question-cards').hidden = restack || !prompt.shown.length;
+  $('question-cards').replaceChildren(...(restack || special ? [] : prompt.shown.map(cardFace)));
+  $('question-cards').hidden = restack || special || !prompt.shown.length;
   $('answer-form').hidden = run.reveal;
   $('reveal-answer').hidden = !run.reveal;
-  $('answer-choices').hidden = restack || !run.choice;
-  $('answer-pad').hidden = restack || run.choice;
+  $('answer-choices').hidden = restack || special || !run.choice;
+  $('answer-pad').hidden = restack || special || run.choice;
   $('restack-board').hidden = !restack;
-  $('submit-answer').hidden = run.reveal || (!restack && run.choice);
+  $('beyond-board').hidden = !special;
+  $('submit-answer').hidden = run.reveal || pick || (!restack && !special && run.choice);
   $('skip-answer').hidden = run.reveal;
   $('next-question').hidden = true;
   $('feedback').hidden = true;
   if (!run.reveal) {
     if (restack) setupRestack(prompt);
+    else if (special) setupBeyondBoard(prompt);
     else if (run.choice) renderChoices(prompt);
     else setupManual(prompt);
   }
@@ -533,11 +681,34 @@ function showQuestion() {
   $('question-text').focus({ preventScroll: true });
 }
 
-function feedback(prompt, right, skipped) {
+function jazzReview(prompt, result) {
+  const review = element('div', undefined, 'jazz-review');
+  if (result.score) {
+    const [first, span, spread] = result.score;
+    review.append(element('small', t(
+      `${result.optimal ? 'Phương án tối ưu' : 'Phương án hợp lệ'} · Lá đầu ${first} · Độ trải ${span} · Chênh lệch khoảng cách ${spread}`,
+      `${result.optimal ? 'Top-ranked answer' : 'Valid answer'} · First card ${first} · Span ${span} · Gap spread ${spread}`,
+    )));
+  }
+  if (!result.count) review.append(element('small', t('Không có phương án hợp lệ trong vùng.', 'There is no valid hand in this range.')));
+  const alternatives = result.betterOptions ?? result.options;
+  if (alternatives.length) {
+    review.append(element('strong', result.score ? t('Phương án thuận tiện hơn', 'More convenient options') : t('Phương án hợp lệ', 'Valid options')));
+    for (const { positions } of alternatives) {
+      const line = positions.map(position => `${position} ${cardLabel(prompt.jazz.cards[position - 1])}`).join(' · ');
+      review.append(element('small', line));
+    }
+  }
+  return review;
+}
+
+function feedback(prompt, right, skipped, jazzResult) {
   const title = skipped ? t('Đã bỏ qua', 'Skipped') : right === null ? t('Đáp án', 'Answer') : right ? t('Đúng', 'Correct') : t('Sai', 'Incorrect');
-  $('feedback').dataset.result = right === false ? 'wrong' : 'answer';
-  $('feedback').textContent = `${title} · ${formatAnswer(prompt)}`;
-  $('feedback').hidden = false;
+  const panel = $('feedback');
+  panel.dataset.result = right === false ? 'wrong' : 'answer';
+  if (jazzResult) panel.replaceChildren(element('strong', title), jazzReview(prompt, jazzResult));
+  else panel.textContent = `${title} · ${formatAnswer(prompt)}`;
+  panel.hidden = false;
 }
 
 function showNextButton() {
@@ -547,12 +718,13 @@ function showNextButton() {
   next.focus({ preventScroll: true });
 }
 
-function record(correct, values = [], skipped = false) {
+function record(correct, values = [], skipped = false, jazzResult) {
   if (!run || run.answered) return;
   const prompt = run.questions[run.index];
   run.answered = true;
   run.count++;
-  const result = { prompt, correct, values, skipped, ms: performance.now() - run.questionStarted };
+  const ms = (run.submittedAt ?? performance.now()) - run.questionStarted;
+  const result = { prompt, correct, values, skipped, ms, jazz: jazzResult };
   const trackedPrompt = run.restack && !correct && !skipped
     ? { ...prompt, focus: prompt.answer.filter((card, i) => card !== run.restack[i]) }
     : prompt;
@@ -573,7 +745,7 @@ function record(correct, values = [], skipped = false) {
   $('submit-answer').hidden = true;
   $('skip-answer').hidden = true;
   $('session-content').scrollTop = 0;
-  feedback(prompt, correct, skipped);
+  feedback(prompt, correct, skipped, jazzResult);
   showNextButton();
 }
 
@@ -608,6 +780,11 @@ function renderResults() {
     item.append(element('strong', promptText(result.prompt)));
     if (result.prompt.shown.length) item.append(element('small', result.prompt.shown.map(cardLabel).join(' '), 'muted'));
     const input = result.values.join(' · ');
+    if (result.jazz) {
+      const choice = input ? ` · ${t('Bạn nhập', 'You entered')} ${input}` : '';
+      item.append(element('small', badge.join(' · ') + choice, 'muted'), jazzReview(result.prompt, result.jazz));
+      return item;
+    }
     const reviewText = `${input && !result.correct ? `${t('Bạn nhập', 'You entered')} ${input}. ` : ''}${t('Đáp án', 'Answer')} ${formatAnswer(result.prompt)}.`;
     item.append(element('small', `${badge.join(' · ')}. ${reviewText}`, 'muted'));
     return item;
@@ -622,6 +799,27 @@ function exitRound(note = '') {
   clearInterval(timer);
   if (history.state?.trainerRound) history.back();
   else readTrainerRoute();
+}
+
+function showCsvStatus(text, error = false) {
+  const status = $('stack-csv-status');
+  status.textContent = text;
+  status.classList.toggle('error', error);
+  status.hidden = false;
+}
+
+function saveSelectedStackCsv() {
+  if (!selectedStack) return;
+  const blob = new Blob([exportStackCsv(selectedStack)], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = element('a');
+  link.href = url;
+  link.download = (selectedStack.label.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').trim() || 'stack') + '.csv';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showCsvStatus(t(`Đã xuất ${selectedStack.label}.`, `Exported ${selectedStack.label}.`));
 }
 
 $('language').addEventListener('click', () => {
@@ -663,7 +861,18 @@ for (const button of all('[data-learn]')) button.addEventListener('click', () =>
   renderStudy();
 });
 for (const button of all('[data-range]')) button.addEventListener('click', () => changeRange(...button.dataset.range.split(',').map(Number)));
-for (const id of ['range-start', 'range-end']) $(id).addEventListener('change', () => { const { start, end } = range(); changeRange(start, end); });
+for (const id of ['range-start', 'range-end']) {
+  const field = $(id);
+  field.addEventListener('input', () => {
+    if (!field.value || !field.validity.valid) return;
+    resetFlip();
+    renderSetup();
+  });
+  field.addEventListener('change', () => {
+    const { start, end } = range();
+    changeRange(start, end);
+  });
+}
 
 $('active-stack').addEventListener('change', chooseStack);
 window.addEventListener('storage', event => { if (event.key === libraryKey) fillStacks(selectedStack.id); });
@@ -690,24 +899,65 @@ $('save-stack').addEventListener('submit', event => {
       ? t('Nhập tên stack.', 'Enter a stack name.') : t('Không lưu được stack trên trình duyệt này.', 'This browser could not save the stack.');
   }
 });
+$('export-stack').addEventListener('click', saveSelectedStackCsv);
+$('import-stack').addEventListener('click', () => $('stack-csv-file').click());
+$('stack-csv-file').addEventListener('change', async event => {
+  const input = event.currentTarget;
+  const file = input.files[0];
+  if (!file) return;
+  $('import-stack').disabled = true;
+  try {
+    const fallback = file.name.replace(/\.csv$/i, '').trim() || t('Stack nhập từ CSV', 'Imported stack');
+    const imported = importStackCsv(await file.text(), fallback);
+    const entry = saveStack(imported.label, stackOrder(imported.cards));
+    fillStacks(entry.id);
+    chooseStack();
+    showCsvStatus(t(`Đã nạp ${entry.label} vào thư viện.`, `Loaded ${entry.label} into your library.`));
+  } catch (error) {
+    const copy = {
+      csvFormat: t('CSV cần một cột Card hoặc một danh sách 52 lá.', 'Use a Card column or a list of 52 cards.'),
+      csvPositions: t('Cột Position phải có các vị trí từ 1 đến 52, mỗi vị trí một lần.', 'Use positions 1 through 52, with each position listed once.'),
+      csvOneStack: t('Mỗi file CSV chỉ chứa một stack.', 'Each CSV must contain one stack.'),
+    };
+    showCsvStatus(error.code ? message(lang, error.code, ...error.parameters) : copy[error.message] ||
+      t('Không thể đọc hoặc lưu stack từ CSV.', 'Could not read or save the stack from CSV.'), true);
+  } finally {
+    input.value = '';
+    $('import-stack').disabled = false;
+  }
+});
 
 $('flip-side').addEventListener('change', () => { flipped = false; renderStudy(); });
 $('flip-card').addEventListener('click', () => { flipped = !flipped; renderStudy(); });
 $('flip-prev').addEventListener('click', () => { studyIndex--; flipped = false; renderStudy(); });
 $('flip-next').addEventListener('click', () => { studyIndex++; flipped = false; renderStudy(); });
 $('practice-focus').addEventListener('change', renderSetup);
+for (const [value, label] of Object.entries(handNames)) $('jazz-hand').add(new Option(label, value));
+$('split-count').addEventListener('change', () => {
+  const sizes = splitDefaults[$('split-count').value];
+  $('split-sizes').value = '';
+  $('split-sizes').placeholder = sizes.join(', ');
+});
 $('practice-form').addEventListener('submit', newRound);
 $('answer-form').addEventListener('submit', event => {
   event.preventDefault();
-  if (run?.restack) submitAnswer(run.restack);
-  else if (run && !run.choice && !run.reveal) submitAnswer(manualValues(run.manual));
+  if (!run || run.answered || $('submit-answer').disabled || $('submit-answer').hidden) return;
+  if (run.submitBoard) run.submitBoard();
+  else if (run.restack) submitAnswer(run.restack);
+  else if (!run.choice && !run.reveal) submitAnswer(manualValues(run.manual));
 });
-$('skip-answer').addEventListener('click', () => record(false, [], true));
+$('skip-answer').addEventListener('click', () => {
+  if (!run || run.answered) return;
+  const prompt = run.questions[run.index];
+  run.submittedAt = performance.now();
+  record(false, [], true, prompt.jazz ? findJazzOptions(prompt.jazz) : undefined);
+});
 $('reveal-answer').addEventListener('click', () => {
   if (!run?.reveal || run.answered) return;
   run.answered = true;
   run.count++;
-  feedback(run.questions[run.index], null, false);
+  const prompt = run.questions[run.index];
+  feedback(prompt, null, false, prompt.jazz ? findJazzOptions(prompt.jazz) : undefined);
   $('reveal-answer').hidden = true;
   showNextButton();
 });

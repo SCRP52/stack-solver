@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0d0d0d">
   <title>Stack Trainer</title>
-  <link rel="stylesheet" href="./app.css">
-  <link rel="stylesheet" href="./trainer.css?v=31">
+  <link rel="stylesheet" href="./app.css?v=33">
+  <link rel="stylesheet" href="./trainer.css?v=33">
 </head>
 <body class="trainer-page">
   <header class="header trainer-header">
@@ -47,6 +47,14 @@
             <p class="error" id="custom-error" role="status" hidden></p>
           </form>
         </details>
+        <div class="settings-csv">
+          <div class="actions">
+            <button type="button" class="secondary" id="import-stack" data-en="Import CSV">Nhập CSV</button>
+            <button type="button" class="secondary" id="export-stack" data-en="Export CSV">Xuất CSV</button>
+          </div>
+          <input type="file" id="stack-csv-file" accept=".csv,text/csv" hidden>
+          <p id="stack-csv-status" class="hint" role="status" hidden></p>
+        </div>
         <div class="settings-row">
           <span data-en="Language">Ngôn ngữ</span>
           <button type="button" class="secondary language" id="language" aria-label="Switch to English" lang="en">EN</button>
@@ -102,7 +110,10 @@
             <button type="button" class="secondary" data-level="advanced" aria-pressed="false"><span>Advanced</span><small>Level 2</small></button>
             <button type="button" class="secondary" data-level="beyond" aria-pressed="false"><span>Beyond</span><small>Level 3</small></button>
           </div>
-          <p id="beyond" class="trainer-placeholder muted" hidden data-en="Beyond is in development. It will require learning the full stack.">Beyond đang phát triển. Cần học đủ stack để mở khóa.</p>
+          <div id="practice-gate" class="panel practice-gate" hidden>
+            <p id="practice-gate-message" role="status"></p>
+            <div id="practice-gate-range"></div>
+          </div>
           <div id="practice-drills" class="practice-drills"></div>
         </section>
         <section id="practice-setup" class="panel" aria-labelledby="practice-drill-title" hidden>
@@ -110,7 +121,7 @@
             <h1 class="trainer-title" id="practice-drill-title" tabindex="-1"></h1>
             <p id="drill-description" class="drill-description"></p>
           </div>
-          <form id="practice-form">
+          <form id="practice-form" novalidate>
             <div id="practice-stack"></div>
             <div id="practice-range"></div>
             <div class="trainer-segment practice-modes" aria-label="Practice mode">
@@ -118,6 +129,28 @@
               <button type="button" class="quiet" data-mode="trial" aria-pressed="false" data-en="Time Trial">Thi</button>
             </div>
             <p id="practice-mode-description" class="hint"></p>
+            <details id="beyond-split-settings" class="drill-settings" open hidden>
+              <summary data-en="Pile sizes">Cỡ tụ</summary>
+              <div class="fields">
+                <div><label for="split-count" data-en="Piles">Số tụ</label>
+                  <select id="split-count"><option>2</option><option>3</option><option selected>4</option><option>5</option></select></div>
+                <div><label for="split-sizes" data-en="Cards in each pile">Số lá từng tụ</label>
+                  <input id="split-sizes" inputmode="text" autocomplete="off" placeholder="13, 13, 13, 13"></div>
+              </div>
+              <p class="hint" data-en="Leave blank for the default. Custom pile sizes must add up to 52.">Để trống để dùng mặc định. Tổng số lá của các tụ phải bằng 52.</p>
+            </details>
+            <details id="beyond-jazz-settings" class="drill-settings" open hidden>
+              <summary>Jazzing Range</summary>
+              <div class="fields">
+                <div><label for="jazz-first" data-en="From position">Từ vị trí</label><input id="jazz-first" type="number" min="1" max="52" value="1" inputmode="numeric"></div>
+                <div><label for="jazz-last" data-en="To position">Đến vị trí</label><input id="jazz-last" type="number" min="1" max="52" value="13" inputmode="numeric"></div>
+              </div>
+              <div id="poker-hand-setting">
+                <label for="jazz-hand" data-en="Hand">Tay bài</label>
+                <select id="jazz-hand"><option value="all" data-en="Random hand">Tay bài ngẫu nhiên</option></select>
+              </div>
+              <p class="hint" data-en="The actual bottom card is available even outside the range.">Có thể dùng lá đáy thực tế, kể cả khi nằm ngoài vùng.</p>
+            </details>
             <div class="practice-fields">
               <div id="trial-count-field" hidden>
                 <label for="trial-count" data-en="Question count">Số câu</label>
@@ -167,6 +200,7 @@
                 <div id="answer-slots" class="answer-slots"></div>
                 <div id="answer-keys"></div>
               </div>
+              <div id="beyond-board" class="beyond-board" hidden></div>
               <div id="restack-board" hidden>
                 <div class="restack-heading">
                   <h3 id="restack-answer-label" data-en="Your order">Thứ tự đã xếp</h3>
@@ -198,6 +232,6 @@
         <p class="trainer-placeholder muted" data-en="Performance Assistant is in development.">Assistant hỗ trợ biểu diễn đang phát triển.</p>
       </section>
   </main>
-  <script type="module" src="./trainer.mjs?v=31"></script>
+  <script type="module" src="./trainer.mjs?v=33"></script>
 </body>
 </html>

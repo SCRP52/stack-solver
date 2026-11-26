@@ -109,12 +109,15 @@ function updateTargetMode() {
 function updateStart() {
   const preset = getPreset($('start').value);
   const custom = $('start').value === 'custom';
+  const partial = $('start-mode').value === 'partial';
+  $('full-start').hidden = partial;
+  $('start-full-fields').hidden = usesPacketGrid();
   $('start-custom').hidden = !custom || usesPacketGrid();
-  $('start-packet').hidden = !custom || !usesPacketGrid();
-  $('start-pos-fields').hidden = $('start').value !== 'partial';
+  $('start-packet').hidden = !usesPacketGrid();
+  $('start-pos-fields').hidden = !partial;
   $('start-preview').hidden = !preset;
   $('start-preview').value = preset?.cards.join(' ') ?? '';
-  $('save-initial-stack').hidden = !custom && !preset;
+  $('save-initial-stack').hidden = partial || (!custom && !preset);
 }
 
 function loadCards(cards, name) {
@@ -144,7 +147,6 @@ function installPresetOptions() {
     }
     if (id === 'start') {
       select.add(new Option(t('customStart'), 'custom'));
-      select.add(new Option(t('somePositions'), 'partial'));
     }
     select.value = [...select.options].some(option => option.value === selected) ? selected : '';
     if (id === 'start' && usesPacketGrid() && !select.value) select.value = 'custom';
@@ -154,7 +156,7 @@ function installPresetOptions() {
 const presetName = preset => ['phoenix', 'stebbins'].includes(preset.id) ? t(preset.id) : preset.label;
 
 function saveLibraryStack(initial) {
-  if (usesPacketGrid() || (initial ? $('start').value === 'partial' : $('target-mode').value === 'partial')) return;
+  if (usesPacketGrid() || $(initial ? 'start-mode' : 'target-mode').value === 'partial') return;
   try {
     const preset = getPreset($('start').value);
     const raw = initial ? (preset ? stackOrder(preset.cards) : $('start-custom').value) : $('target').value;
@@ -282,7 +284,7 @@ function updateDeck() {
 
 function reverseInput(side) {
   const starting = side === 'start';
-  const partial = starting ? $('start').value === 'partial' : $('target-mode').value === 'partial';
+  const partial = $(starting ? 'start-mode' : 'target-mode').value === 'partial';
   if (partial || usesPacketGrid()) {
     const id = `${side}-${partial ? 'positions' : 'packet'}`;
     if (starting && !partial) { $('start').value = 'custom'; updateStart(); }
@@ -579,7 +581,8 @@ function restore(entry) {
   $('packet-joker').checked = Boolean(entry.packetJoker);
   updateDeck();
   const preset = usesPacketGrid() ? null : findPreset(entry.startCards);
-  $('start').value = entry.startPositions ? 'partial' : preset?.id ?? 'custom';
+  $('start-mode').value = entry.startPositions ? 'partial' : 'full';
+  $('start').value = preset?.id ?? 'custom';
   if (entry.startPositions) {
     const cards = new Map(entry.startPositions);
     writeGrid('start-positions', Array.from({ length: size }, (_, slot) => cards.get(slot) ?? ''));
@@ -645,9 +648,9 @@ $('solver-form').addEventListener('submit', event => {
   showError();
   try {
     if (!updateDeck()) return;
-    if (!$('start').value) throw new ConverterError('needSource');
+    const startPartial = $('start-mode').value === 'partial';
+    if (!startPartial && !usesPacketGrid() && !$('start').value) throw new ConverterError('needSource');
     const startPreset = getPreset($('start').value);
-    const startPartial = $('start').value === 'partial';
     const start = startPartial ? parseGrid('start-positions', true) : usesPacketGrid() ? parseGrid('start-packet', false)
       : parseCards(startPreset ? startPreset.cards.join(' ') : $('start-custom').value);
     const partial = $('target-mode').value === 'partial';
@@ -726,6 +729,14 @@ $('solver-form').addEventListener('submit', event => {
 $('target').addEventListener('input', () => { $('target-preset').value = ''; updateCount(); showError(); });
 $('target-mode').addEventListener('change', updateTargetMode);
 $('start').addEventListener('change', () => { updateStart(); showError(); });
+$('start-mode').addEventListener('change', () => {
+  if ($('start-mode').value === 'partial') {
+    $('target-mode').value = 'partial';
+    updateTargetMode();
+  }
+  updateStart();
+  showError();
+});
 $('save-initial-stack').addEventListener('click', () => saveLibraryStack(true));
 $('save-target-stack').addEventListener('click', () => saveLibraryStack(false));
 window.addEventListener('storage', event => { if (event.key === libraryKey) installPresetOptions(); });

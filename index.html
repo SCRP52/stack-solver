@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0d0d0d">
   <meta name="description" content="Find a sequence of moves to convert one playing-card stack into another.">
   <title>Stack Converter</title>
-  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" href="./app.css?v=33">
 </head>
 <body>
   <header class="header">
@@ -45,36 +45,47 @@
           <p id="packet-rank-help" class="hint" hidden data-en="Enter ranks such as A, 10 or K. Up to 13 cards.">Nhập giá trị như A, 10 hoặc K. Tối đa 13 lá.</p>
           <p id="packet-joker-help" class="hint" hidden data-en="Enter X for Joker. Joker takes one slot.">Nhập X cho Joker. Joker chiếm một ô.</p>
         </div>
-        <div class="stack-heading"><label for="start" data-en="Initial stack">Stack ban đầu</label><button type="button" class="quiet" id="reverse-start" data-lock data-en="Reverse order">Đảo thứ tự</button></div>
-        <select id="start" data-lock>
-          <option value="">Chọn stack ban đầu</option>
-        </select>
-        <textarea id="start-preview" class="start-order" rows="4" readonly hidden aria-label="52 lá ban đầu từ trên xuống" data-en-aria="52 initial cards, top to bottom"></textarea>
-        <textarea id="start-custom" class="start-order" data-lock rows="4" hidden aria-label="Nhập 52 lá ban đầu" data-en-aria="Enter all 52 initial cards" placeholder="AS 2S 3S …"></textarea>
-        <div id="start-packet" class="entry-grid" hidden></div>
-        <div id="start-pos-fields" hidden>
-          <div id="start-positions" class="entry-grid"></div>
-          <p class="hint" data-en="Enter what you know. Blank positions can contain any remaining cards.">Nhập các lá bạn biết. Ô trống có thể là lá bất kỳ còn lại.</p>
-        </div>
-        <div class="stack-heading"><label for="target-mode" data-en="Target type">Kiểu đích</label><button type="button" class="quiet" id="reverse-target" data-lock data-en="Reverse order">Đảo thứ tự</button></div>
-        <select id="target-mode" data-lock>
-          <option value="full" data-en="All cards">Tất cả lá</option>
-          <option value="partial" data-en="Specific card positions">Vài lá theo vị trí</option>
-        </select>
-        <div id="full-target">
-          <div id="target-full-fields">
-            <label for="target-preset" data-en="Target stack">Nạp stack đích</label>
-            <select id="target-preset" data-lock><option value="">Chọn stack có sẵn</option></select>
-            <label for="target"><span data-en="Target card order">Thứ tự stack đích</span> <span id="card-count" class="counter">0/52</span></label>
-            <textarea id="target" data-lock rows="5" placeholder="AS 2S QD 10H …" autocapitalize="characters" spellcheck="false" aria-describedby="target-help"></textarea>
-            <p id="target-help" class="hint" data-en="Separate the 52 cards with spaces, commas or line breaks.">Dán 52 lá, cách nhau bằng dấu cách, dấu phẩy hoặc xuống dòng.</p>
+        <section class="stack-entry" aria-labelledby="initial-mode-label">
+          <div class="stack-heading"><label id="initial-mode-label" for="start-mode" data-en="Initial stack">Stack ban đầu</label><button type="button" class="quiet" id="reverse-start" data-lock data-en="Reverse order">Đảo thứ tự</button></div>
+          <select id="start-mode" data-lock>
+            <option value="full" data-en="All cards">Tất cả lá</option>
+            <option value="partial" data-en="Specific card positions">Vài lá theo vị trí</option>
+          </select>
+          <div id="full-start">
+            <div id="start-full-fields">
+              <label for="start" data-en="Load initial stack">Nạp stack ban đầu</label>
+              <select id="start" data-lock><option value="">Chọn stack ban đầu</option></select>
+              <textarea id="start-preview" class="start-order" rows="4" readonly hidden aria-label="52 lá ban đầu từ trên xuống" data-en-aria="52 initial cards, top to bottom"></textarea>
+              <textarea id="start-custom" class="start-order" data-lock rows="4" hidden aria-label="Nhập 52 lá ban đầu" data-en-aria="Enter all 52 initial cards" placeholder="AS 2S 3S …"></textarea>
+            </div>
+            <div id="start-packet" class="entry-grid" hidden></div>
           </div>
-          <div id="target-packet" class="entry-grid" hidden></div>
-        </div>
-        <div id="partial-target" hidden>
-          <div id="target-positions" class="entry-grid"></div>
-          <p id="positions-help" class="hint" data-en="Enter cards such as AS or 10H in the numbered boxes. Position 1 is the top card.">Nhập lá như AS hoặc 10H vào ô. Vị trí 1 là lá đầu bộ.</p>
-        </div>
+          <div id="start-pos-fields" hidden>
+            <div id="start-positions" class="entry-grid"></div>
+            <p class="hint" data-en="Enter what you know. Blank positions can contain any remaining cards.">Nhập các lá bạn biết. Ô trống có thể là lá bất kỳ còn lại.</p>
+          </div>
+        </section>
+        <section class="stack-entry" aria-labelledby="target-mode-label">
+          <div class="stack-heading"><label id="target-mode-label" for="target-mode" data-en="Target stack">Stack đích</label><button type="button" class="quiet" id="reverse-target" data-lock data-en="Reverse order">Đảo thứ tự</button></div>
+          <select id="target-mode" data-lock>
+            <option value="full" data-en="All cards">Tất cả lá</option>
+            <option value="partial" data-en="Specific card positions">Vài lá theo vị trí</option>
+          </select>
+          <div id="full-target">
+            <div id="target-full-fields">
+              <label for="target-preset" data-en="Load target stack">Nạp stack đích</label>
+              <select id="target-preset" data-lock><option value="">Chọn stack có sẵn</option></select>
+              <label for="target"><span data-en="Target card order">Thứ tự stack đích</span> <span id="card-count" class="counter">0/52</span></label>
+              <textarea id="target" data-lock rows="5" placeholder="AS 2S QD 10H …" autocapitalize="characters" spellcheck="false" aria-describedby="target-help"></textarea>
+              <p id="target-help" class="hint" data-en="Separate the 52 cards with spaces, commas or line breaks.">Dán 52 lá, cách nhau bằng dấu cách, dấu phẩy hoặc xuống dòng.</p>
+            </div>
+            <div id="target-packet" class="entry-grid" hidden></div>
+          </div>
+          <div id="partial-target" hidden>
+            <div id="target-positions" class="entry-grid"></div>
+            <p id="positions-help" class="hint" data-en="Enter cards such as AS or 10H in the numbered boxes. Position 1 is the top card.">Nhập lá như AS hoặc 10H vào ô. Vị trí 1 là lá đầu bộ.</p>
+          </div>
+        </section>
         <label for="name"><span data-en="Save as">Tên để lưu</span> <span class="muted" data-en="(optional)">(tùy chọn)</span></label>
         <input id="name" data-lock maxlength="60" type="text" placeholder="Stack của tôi" data-en-placeholder="My stack">
         <div id="library-actions" class="actions library-actions">
@@ -178,6 +189,6 @@
     <ul id="history-list" class="history-list"></ul>
     <p class="hint" data-en="Stacks and routes are stored in this browser.">Các stack và lời giải được lưu trong trình duyệt này.</p>
   </dialog>
-  <script type="module" src="./app.mjs?v=32"></script>
+  <script type="module" src="./app.mjs?v=33"></script>
 </body>
 </html>

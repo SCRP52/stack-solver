@@ -221,9 +221,9 @@ export function answerChoices(prompt, cards, { start = 1, end = size } = {}, ran
     for (let i = 0; i < answer.length; i++) {
       let alternatives;
       if (numeric) {
-        const min = kind === 'cut-count' ? 0 : kind === 'relative-quartet' ? 2 : 1;
-        const max = kind === 'quartet-distances' ? size - 1 - answer.reduce((sum, value, j) => sum + (i === j ? 0 : value), 0)
-          : ['cut-count', 'forward-distance', 'backward-distance', 'relative-position'].includes(kind) ? size - 1 : size;
+        const min = kind === 'cut-count' || prompt.zeroAllowed ? 0 : kind === 'relative-quartet' ? 2 : 1;
+        const max = prompt.maxAnswer ?? (kind === 'quartet-distances' ? size - 1 - answer.reduce((sum, value, j) => sum + (i === j ? 0 : value), 0)
+          : ['cut-count', 'forward-distance', 'backward-distance', 'relative-position'].includes(kind) ? size - 1 : size);
         alternatives = kind === 'card-position' && end - start >= 2 ? positions.slice(start - 1, end)
           : Array.from({ length: max - min + 1 }, (_, index) => min + index);
       } else {

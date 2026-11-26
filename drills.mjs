@@ -2,7 +2,7 @@ import { cardCode, deckLength as size, cardLabel } from './stack-library.mjs';
 
 export const basic = ['card-position', 'position-card', 'previous', 'next'];
 export const advanced = {
-  acaan: ['cut-count', 'cut-card', 'shifted-acaan', 'reverse-acaan'],
+  acaan: ['cut-count', 'cut-card', 'offset-order'],
   quartet: ['quartet-positions', 'quartet-order', 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank'],
   mate: ['mate-position', 'mate-distance', 'relative-mate'],
   distance: ['forward-distance', 'backward-distance', 'forward-offset', 'backward-offset', 'between'],
@@ -64,8 +64,6 @@ export function buildQuestion(model, skill, index, variant = 0) {
       if (!count) return null;
       return ask([face, number], at(count - 1));
     }
-    case 'shifted-acaan': return ask([cardLabel(bottom), face, number], cutCountFor(positionAfterCut(index, cut), number), [card, bottom]);
-    case 'reverse-acaan': return ask([face, number], cutCountFor(fromTop, size + 1 - number));
     case 'quartet-positions': {
       const ordered = quartetSuits.map(mark => cardRank + mark);
       return ask([cardRank], ordered.map(member => slot(member) + 1), ordered, ordered.map(cardLabel));
@@ -100,7 +98,8 @@ export function buildQuestion(model, skill, index, variant = 0) {
     case 'forward-offset': return ask([face, variant + 1], other, [card, other]);
     case 'backward-offset': return ask([face, variant + 1], at(index - variant - 1), [card, at(index - variant - 1)]);
     case 'relative-position': return ask([cardLabel(bottom), face], positionAfterCut(index, cut), [card, bottom]);
-    case 'relative-card': return ask([cardLabel(bottom), fromTop], at(cut + index), [bottom, at(cut + index)]);
+    case 'relative-card':
+    case 'offset-order': return ask([cardLabel(bottom), fromTop], at(cut + index), [bottom, at(cut + index)]);
     case 'bottom-position': return ask([face], fromBottom);
     case 'bottom-card': return ask([fromBottom], card);
     case 'single-missing':
@@ -128,7 +127,7 @@ function shuffle(items, random) {
 }
 
 const rankOnly = new Set(['quartet-positions', 'quartet-order']);
-const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card']);
+const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card', 'offset-order']);
 
 export function questionSet(model, skills, { start = 1, end = size, random = Math.random, sequential = false, eligible = () => true } = {}) {
   const buckets = skills.map(skill => {

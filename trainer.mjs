@@ -41,6 +41,8 @@ let settingsBack = '#home';
 let run;
 let timer;
 let roundEndMessage = '';
+const desktopLayout = matchMedia('(min-width: 760px)');
+let openAdvancedGroup = '';
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -169,8 +171,18 @@ function renderDirectory() {
     return anchor;
   };
   directory.replaceChildren(link('all', 'drill-mix'), ...directoryGroups().map(({ key, choices }) => {
-    const section = element('section', undefined, 'panel drill-group');
-    section.append(element('h2', t(...groupCopy[key])), ...choices.map(drill => link(drill)));
+    const section = element('details', undefined, 'panel drill-group');
+    section.open = desktopLayout.matches || level === 'basic' || key === openAdvancedGroup;
+    section.append(element('summary', t(...groupCopy[key])), ...choices.map(drill => link(drill)));
+    if (level === 'advanced' && !desktopLayout.matches) {
+      section.addEventListener('toggle', () => {
+        if (!section.isConnected) return;
+        if (section.open) {
+          openAdvancedGroup = key;
+          for (const other of directory.querySelectorAll('details[open]')) if (other !== section) other.open = false;
+        } else if (openAdvancedGroup === key) openAdvancedGroup = '';
+      });
+    }
     return section;
   }));
 }
@@ -227,6 +239,7 @@ function renderSetup() {
   const trial = mode === 'trial';
   const practice = view === 'practice';
   const configuring = practice && selectedDrill && !run;
+  document.documentElement.classList.toggle('trainer-playing', Boolean(practice && run && !run.finished));
   for (const screen of ['home', 'learn', 'practice', 'assistant', 'settings']) $(screen).hidden = view !== screen;
   $('trainer-back').hidden = view === 'home' || Boolean(practice && run);
   $('trainer-back').href = view === 'settings' ? settingsBack : configuring ? `#practice/${level}` : '#home';
@@ -368,7 +381,13 @@ function setupRestack(prompt) {
   function refresh() {
     const placed = new Set(selected);
     for (const [card, button] of source) button.disabled = placed.has(card);
-    $('restack-answer').replaceChildren(...selected.map((card, i) => {
+    const slots = prompt.answer.map((_, i) => {
+      const card = selected[i];
+      if (!card) {
+        const empty = element('span', undefined, 'restack-empty');
+        empty.setAttribute('aria-hidden', 'true');
+        return empty;
+      }
       const label = cardLabel(card);
       const style = redCard(card) ? 'restack-card answer-red' : 'restack-card';
       return answerButton(label, style, () => {
@@ -376,7 +395,8 @@ function setupRestack(prompt) {
         refresh();
         source.get(card).focus({ preventScroll: true });
       }, t(`Ô ${i + 1}, bỏ ${label} khỏi thứ tự`, `Entry ${i + 1}, remove ${label} from your order`));
-    }));
+    });
+    $('restack-answer').replaceChildren(...slots);
     $('restack-count').textContent = `${selected.length} / ${prompt.answer.length}`;
     $('submit-answer').disabled = selected.length !== prompt.answer.length;
   }
@@ -499,7 +519,8 @@ function showQuestion() {
   $('answer-choices').hidden = restack || !run.choice;
   $('answer-pad').hidden = restack || run.choice;
   $('restack-board').hidden = !restack;
-  $('submit-answer').hidden = !restack && run.choice;
+  $('submit-answer').hidden = run.reveal || (!restack && run.choice);
+  $('skip-answer').hidden = run.reveal;
   $('next-question').hidden = true;
   $('feedback').hidden = true;
   if (!run.reveal) {
@@ -508,6 +529,7 @@ function showQuestion() {
     else setupManual(prompt);
   }
   run.questionStarted = performance.now();
+  $('session-content').scrollTop = 0;
   $('question-text').focus({ preventScroll: true });
 }
 
@@ -522,7 +544,7 @@ function showNextButton() {
   const next = $('next-question');
   next.textContent = run.count === run.limit ? t('Kết thúc lượt', 'Finish session') : t('Câu tiếp theo', 'Next question');
   next.hidden = false;
-  next.focus();
+  next.focus({ preventScroll: true });
 }
 
 function record(correct, values = [], skipped = false) {
@@ -548,6 +570,9 @@ function record(correct, values = [], skipped = false) {
     return;
   }
   $('answer-form').hidden = true;
+  $('submit-answer').hidden = true;
+  $('skip-answer').hidden = true;
+  $('session-content').scrollTop = 0;
   feedback(prompt, correct, skipped);
   showNextButton();
 }
@@ -606,6 +631,7 @@ $('language').addEventListener('click', () => {
 });
 
 window.addEventListener('hashchange', readTrainerRoute);
+desktopLayout.addEventListener('change', () => { if (view === 'practice' && !selectedDrill) renderDirectory(); });
 document.addEventListener('click', event => {
   const link = event.target.closest('a[href^="#"]');
   if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

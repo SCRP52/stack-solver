@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0d0d0d">
-  <title>Trainer · THISDECK</title>
+  <title>Stack Trainer</title>
   <link rel="stylesheet" href="./app.css">
-  <link rel="stylesheet" href="./trainer.css?v=30">
+  <link rel="stylesheet" href="./trainer.css?v=31">
 </head>
-<body>
-  <header class="header">
-    <a class="brand" href="#home"><span aria-hidden="true">♠</span> THISDECK</a>
+<body class="trainer-page">
+  <header class="header trainer-header">
+    <a class="brand" href="#home"><span aria-hidden="true">♠</span> Stack Trainer</a>
     <div class="header-actions">
       <a class="quiet trainer-gear" id="settings-link" href="#settings" aria-label="Cài đặt" data-en-aria="Settings">⚙</a>
     </div>
@@ -18,7 +18,9 @@
   <main class="trainer-main">
     <a class="trainer-back quiet" id="trainer-back" href="#home" hidden><span aria-hidden="true">←</span><span id="trainer-back-label" data-en="Back">Quay lại</span></a>
       <section id="home" aria-labelledby="home-title">
-        <h1 class="trainer-title" id="home-title">Trainer</h1>
+        <div class="trainer-hero">
+          <h1 id="home-title">Stack Trainer</h1>
+        </div>
         <nav class="trainer-menu" aria-label="Trainer">
           <a class="panel trainer-menu-item" href="#learn/flip"><span class="menu-label">Learn</span><span aria-hidden="true">→</span></a>
           <a class="panel trainer-menu-item" href="#practice/basic"><span class="menu-label">Practice</span><span aria-hidden="true">→</span></a>
@@ -60,19 +62,21 @@
             <button type="button" class="quiet" data-learn="grid" aria-pressed="false">Grid</button>
           </div>
         </div>
-        <div id="learn-stack"></div>
-        <div id="learn-range">
-          <div class="range-field" id="range-field">
-          <h2>Stack Range</h2>
-          <div class="fields">
-            <div><label for="range-start" data-en="From position">Từ vị trí</label><input id="range-start" type="number" inputmode="numeric" min="1" max="52" value="1"></div>
-            <div><label for="range-end" data-en="To position">Đến vị trí</label><input id="range-end" type="number" inputmode="numeric" min="1" max="52" value="52"></div>
-          </div>
-          <div class="actions range-actions">
-            <button class="quiet" data-range="1,13">1–13</button><button class="quiet" data-range="14,26">14–26</button>
-            <button class="quiet" data-range="27,39">27–39</button><button class="quiet" data-range="40,52">40–52</button>
-            <button class="quiet" data-range="1,52">1–52</button>
-          </div>
+        <div class="learn-controls">
+          <div id="learn-stack"></div>
+          <div id="learn-range">
+            <div class="range-field" id="range-field">
+              <h2>Stack Range</h2>
+              <div class="fields">
+                <div><label for="range-start" data-en="From position">Từ vị trí</label><input id="range-start" type="number" inputmode="numeric" min="1" max="52" value="1"></div>
+                <div><label for="range-end" data-en="To position">Đến vị trí</label><input id="range-end" type="number" inputmode="numeric" min="1" max="52" value="52"></div>
+              </div>
+              <div class="actions range-actions">
+                <button class="quiet" data-range="1,13">1–13</button><button class="quiet" data-range="14,26">14–26</button>
+                <button class="quiet" data-range="27,39">27–39</button><button class="quiet" data-range="40,52">40–52</button>
+                <button class="quiet" data-range="1,52">1–52</button>
+              </div>
+            </div>
           </div>
         </div>
         <p id="weak-guide" class="hint" hidden data-en="Red borders mark cards you repeatedly missed in Practice.">Viền đỏ đánh dấu lá bạn thường trả lời sai trong Practice.</p>
@@ -102,8 +106,10 @@
           <div id="practice-drills" class="practice-drills"></div>
         </section>
         <section id="practice-setup" class="panel" aria-labelledby="practice-drill-title" hidden>
-          <h1 class="trainer-title" id="practice-drill-title" tabindex="-1"></h1>
-          <p id="drill-description" class="drill-description"></p>
+          <div class="setup-intro">
+            <h1 class="trainer-title" id="practice-drill-title" tabindex="-1"></h1>
+            <p id="drill-description" class="drill-description"></p>
+          </div>
           <form id="practice-form">
             <div id="practice-stack"></div>
             <div id="practice-range"></div>
@@ -148,32 +154,36 @@
           </div>
           <progress id="trial-progress" aria-label="Tiến độ lượt thi" data-en-aria="Trial progress" hidden></progress>
           <p id="trial-size-note" class="hint" hidden></p>
-          <p id="question-skill" class="muted"></p>
-          <h2 id="question-text" tabindex="-1"></h2>
-          <div id="question-cards" class="prompt-cards" hidden></div>
-          <form id="answer-form">
-            <div id="answer-choices" class="answer-choices"></div>
-            <div id="answer-pad" class="answer-pad">
-              <div id="answer-slots" class="answer-slots"></div>
-              <div id="answer-keys"></div>
+          <div class="session-content" id="session-content">
+            <div class="session-prompt">
+              <p id="question-skill" class="muted"></p>
+              <h2 id="question-text" tabindex="-1"></h2>
+              <div id="question-cards" class="prompt-cards" hidden></div>
+              <div id="feedback" role="status" hidden></div>
             </div>
-            <div id="restack-board" hidden>
-              <div class="restack-heading">
-                <h3 id="restack-answer-label" data-en="Your order">Thứ tự đã xếp</h3>
-                <span id="restack-count" class="muted" role="status"></span>
+            <form id="answer-form">
+              <div id="answer-choices" class="answer-choices"></div>
+              <div id="answer-pad" class="answer-pad">
+                <div id="answer-slots" class="answer-slots"></div>
+                <div id="answer-keys"></div>
               </div>
-              <div id="restack-answer" class="restack-grid restack-answer" role="group" aria-labelledby="restack-answer-label"></div>
-              <h3 id="restack-source-label" data-en="Shuffled cards">Bài đã xáo</h3>
-              <div id="restack-source" class="restack-grid" role="group" aria-labelledby="restack-source-label"></div>
-            </div>
-            <div class="actions session-actions">
-              <button class="primary" id="submit-answer" data-en="Submit">Trả lời</button>
-              <button type="button" class="secondary" id="skip-answer" data-en="Skip">Bỏ qua</button>
-            </div>
-          </form>
-          <button type="button" class="primary session-actions" id="reveal-answer" hidden data-en="Reveal answer">Lật đáp án</button>
-          <div id="feedback" role="status" hidden></div>
-          <button type="button" class="primary session-actions" id="next-question" hidden data-en="Next question">Câu tiếp theo</button>
+              <div id="restack-board" hidden>
+                <div class="restack-heading">
+                  <h3 id="restack-answer-label" data-en="Your order">Thứ tự đã xếp</h3>
+                  <span id="restack-count" class="muted" role="status"></span>
+                </div>
+                <div id="restack-answer" class="restack-grid restack-answer" role="group" aria-labelledby="restack-answer-label"></div>
+                <h3 id="restack-source-label" data-en="Shuffled cards">Bài đã xáo</h3>
+                <div id="restack-source" class="restack-grid" role="group" aria-labelledby="restack-source-label"></div>
+              </div>
+            </form>
+          </div>
+          <div class="actions session-footer">
+            <button type="submit" form="answer-form" class="primary" id="submit-answer" data-en="Submit">Trả lời</button>
+            <button type="button" class="secondary" id="skip-answer" data-en="Skip">Bỏ qua</button>
+            <button type="button" class="primary" id="reveal-answer" hidden data-en="Reveal answer">Lật đáp án</button>
+            <button type="button" class="primary" id="next-question" hidden data-en="Next question">Câu tiếp theo</button>
+          </div>
         </div>
         <section id="trial-results" class="panel" hidden aria-labelledby="results-title">
           <h2 id="results-title" data-en="Time Trial results">Kết quả thi</h2>
@@ -188,6 +198,6 @@
         <p class="trainer-placeholder muted" data-en="Performance Assistant is in development.">Assistant hỗ trợ biểu diễn đang phát triển.</p>
       </section>
   </main>
-  <script type="module" src="./trainer.mjs?v=30"></script>
+  <script type="module" src="./trainer.mjs?v=31"></script>
 </body>
 </html>

@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
+
+const card = { rank: 'Q', suit: 'S' };
+
+test('does not accept a card until three matching frames stay still for half a second', () => {
+  const gate = createStableCardGate();
+  assert.equal(gate.update(card, Infinity, 0), null);
+  assert.equal(gate.update(card, 0, 240), null);
+  assert.equal(gate.update(card, 0, 480), null);
+  assert.equal(gate.update(card, 0, 720), null);
+  assert.deepEqual(gate.update(card, 0, 740), card);
+});
+
+test('a moving hand resets the candidate and hides a previously accepted card', () => {
+  const gate = createStableCardGate();
+  gate.update(card, 0, 0);
+  gate.update(card, 0, 240);
+  assert.deepEqual(gate.update(card, 0, 500), card);
+  assert.equal(gate.update(card, 18, 740), null);
+  assert.equal(gate.update(card, 0, 980), null);
+  assert.equal(gate.update(card, 0, 1220), null);
+  assert.deepEqual(gate.update(card, 0, 1480), card);
+});
+
+test('a card change starts a fresh stability window', () => {
+  const gate = createStableCardGate();
+  gate.update(card, 0, 0);
+  gate.update(card, 0, 240);
+  const other = { rank: '7', suit: 'H' };
+  assert.equal(gate.update(other, 0, 480), null);
+  assert.equal(gate.update(other, 0, 720), null);
+  assert.deepEqual(gate.update(other, 0, 980), other);
+});
+
+test('pixel motion is measured as average gray-level change', () => {
+  assert.equal(meanPixelDifference(new Uint8Array([20, 40]), new Uint8Array([20, 54])), 7);
+  assert.equal(meanPixelDifference(new Uint8Array([0]), new Uint8Array([18])), 18);
+  assert.equal(meanPixelDifference(null, new Uint8Array([1])), Infinity);
+  assert.equal(meanPixelDifference(new Uint8Array([1]), new Uint8Array([1, 2])), Infinity);
+});

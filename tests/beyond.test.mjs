@@ -37,36 +37,33 @@ function matches(cards, hand, target) {
 function exhaustive({ cards, hand, targetRanks, first, last }) {
   const available = [];
   for (let i = first; i <= last; i++) available.push(i);
-  if (last < 52) available.push(52);
+  for (const position of [51, 52]) if (!available.includes(position)) available.push(position);
   const matchesInRange = [];
-  for (const subset of choose(available, targetRanks?.length ?? hands[hand])) {
+  for (const subset of choose(available.sort((a, b) => a - b), targetRanks?.length ?? hands[hand])) {
+    if (subset.some(position => position === 51 && (position < first || position > last)) && !subset.includes(52)) continue;
     if (matches(subset.map(position => cards[position - 1]), hand, targetRanks)) matchesInRange.push(subset);
   }
   return matchesInRange;
 }
 
-function geometry(positions) {
-  const upper = positions.filter(position => position < 52);
-  const first = upper[0], width = upper.at(-1) - first;
-  const gaps = upper.slice(1).map((position, index) => position - upper[index]).sort((a, b) => a - b);
-  return [first, width, gaps.length ? gaps.at(-1) - gaps[0] : 0];
-}
-
-function compare(a, b) {
-  const difference = a.findIndex((value, i) => value !== b[i]);
-  return difference === -1 ? 0 : a[difference] - b[difference];
-}
-
 function referenceOrder(subsets) {
-  const withoutBottom = subsets.filter(positions => positions.at(-1) < 52).map(geometry).sort(compare)[0];
   const weight = positions => {
-    const [first, width, gaps] = geometry(positions);
-    const usingBottom = positions.at(-1) === 52;
-    const assisted = !withoutBottom || first - withoutBottom[0] <= 1 && width - withoutBottom[1] <= 2;
-    const preference = usingBottom ? (assisted ? 0 : 2) : 1;
-    return [preference, first, width, gaps, ...positions];
+    let remaining = positions;
+    if (remaining.at(-1) === 52) {
+      remaining = remaining.slice(0, -1);
+      if (remaining.at(-1) === 51) remaining = remaining.slice(0, -1);
+    }
+    const gaps = remaining.slice(1).map((position, index) => position - remaining[index]).sort((a, b) => a - b);
+    const longest = gaps.at(-1) ?? 0;
+    const uneven = longest - (gaps[0] ?? 0);
+    const span = (remaining.at(-1) ?? 0) - (remaining[0] ?? 0);
+    return longest > 10 ? null : [remaining.length, uneven, longest, span, ...positions];
   };
-  return subsets.sort((a, b) => compare(weight(a), weight(b)));
+  return subsets.map(positions => [positions, weight(positions)]).filter(([, weight]) => weight)
+    .sort(([, a], [, b]) => {
+      const index = a.findIndex((value, i) => value !== b[i]);
+      return index === -1 ? 0 : a[index] - b[index];
+    }).map(([positions]) => positions);
 }
 
 test('Jazzing agrees with exhaustive combinations and ranking across all 52 cuts on every preset', () => {
@@ -77,11 +74,12 @@ test('Jazzing agrees with exhaustive combinations and ranking across all 52 cuts
       assert.equal(rotated[0], cards[(cut + 1) % 52]);
       const variants = [...Object.keys(hands).map(hand => ({ hand })), { targetRanks: ['10', 'J', 'Q', 'K', 'A'] }];
       for (const variant of variants) {
-        const context = { ...variant, cards: rotated, first: cut % 3 + 1, last: cut % 4 + 7 };
-        const expected = referenceOrder(exhaustive(context));
+        const context = { ...variant, cards: rotated, first: cut % 3 + 1, last: cut % 6 + 7 };
+        const valid = exhaustive(context);
+        const expected = referenceOrder(valid);
         const found = findJazzOptions(context);
         const sample = `${id} / ${bottom} / ${variant.hand ?? 'specific'}`;
-        assert.equal(found.count, expected.length, sample);
+        assert.equal(found.count, valid.length, sample);
         assert.deepEqual(found.options.map(option => option.positions), expected.slice(0, 3), sample);
         assert.ok(found.options.every(option => validJazz(context, option.positions)), sample);
       }
@@ -89,41 +87,70 @@ test('Jazzing agrees with exhaustive combinations and ranking across all 52 cuts
   }
 });
 
-test('Jazzing accepts useful alternatives, distinguishes no solution and considers the real bottom', () => {
-  const make = (head, bottom, hand = 'pair', last = head.length) => {
-    const cards = [...head, ...presets[0].cards.filter(card => !head.includes(card) && card !== bottom), bottom];
-    return { cards, first: 1, last, hand };
-  };
-  const available = make(['AS', '2S', '3S', 'AD', '4S'], '2H');
-  assert.deepEqual(findJazzOptions(available).options[0].positions, [2, 52]);
-  const alternative = gradeJazz(available, [4, 1]);
-  assert.equal(alternative.valid, true);
-  assert.equal(alternative.optimal, false);
-  assert.deepEqual(alternative.betterOptions.map(option => option.positions), [[2, 52]]);
-  assert.equal(gradeJazz(available, [1, 1]).valid, false);
-  assert.equal(gradeJazz(available, [2, 51]).valid, false);
-  assert.equal(gradeJazz(available, null).valid, false);
-  assert.equal(gradeJazz({ ...available, last: 1 }, null).valid, true);
+function arrangedDeck(head, bottomCards, hand, last = head.length) {
+  const occupied = head.filter(Boolean).concat(bottomCards);
+  const spare = presets[0].cards.filter(card => !occupied.includes(card));
+  const cards = Array.from({ length: 52 - bottomCards.length }, (_, i) => head[i] ?? spare.shift()).concat(bottomCards);
+  return { cards, first: 1, last, hand };
+}
 
-  const distantBottom = make(['AS', '3S', 'AD', '2S', '7C'], '2H');
-  assert.deepEqual(findJazzOptions(distantBottom).options[0].positions, [1, 3]);
-  const wideBottom = make(['AS','2S','3S','4S','5S','6S','7S','8S','9S','KH','QD','2D','3D','4D','AD'], 'AH', 'three');
-  assert.deepEqual(jazzScore([3, 5, 7, 52]), [3, 4, 0]);
-  assert.deepEqual(jazzScore([3, 4, 7, 52]), [3, 4, 2]);
-  assert.equal(validJazz(wideBottom, [1, 15, 52]), true);
-  assert.deepEqual(findJazzOptions({ ...wideBottom, last: 14 }).options, []);
+test('Jazzing prefers even gaps to proximity and accepts equally ranked answers', () => {
+  const head = ['AS', 'AD', '5C', 'AH', '2S', '8C', '7C', '9C', '2D', '10C', 'JC', 'QC', '2H'];
+  const context = arrangedDeck(head, ['KS', 'KH'], 'three');
+  assert.deepEqual(findJazzOptions(context).options[0].positions, [5, 9, 13]);
+  assert.deepEqual(gradeJazz(context, [1, 2, 4]).betterOptions[0].positions, [5, 9, 13]);
+  assert.equal(gradeJazz(context, [1, 2, 4]).valid, true);
 
-  const badSpan = make(['AS', '2S', '2D', '2H', '9S', '7H', '8S', 'JC', 'KD', '4C', 'AD'], 'AH', 'three');
-  assert.deepEqual(findJazzOptions(badSpan).options[0].positions, [2, 3, 4]);
-  assert.equal(gradeJazz(badSpan, [1, 11, 52]).valid, true);
-  assert.equal(gradeJazz(badSpan, [1, 11, 52]).optimal, false);
-
-  const tied = make(['AS', '2S', '2H', '3S', '4S', '4H', '5S'], 'KH', 'straight');
+  const tied = arrangedDeck(['AS', '2S', '2H', '3S', '4S', '4H', '5S'], ['KD', 'KH'], 'straight');
   assert.equal(gradeJazz(tied, [1, 2, 4, 5, 7]).optimal, true);
   assert.equal(gradeJazz(tied, [1, 3, 4, 6, 7]).optimal, true);
   assert.deepEqual(gradeJazz(tied, [1, 3, 4, 6, 7]).betterOptions, []);
-  const options = findJazzOptions({ ...available, last: 52 });
-  assert.equal(options.count, 78);
+});
+
+test('Jazzing counts 52 as covered and counts 51 only together with 52', () => {
+  const context = arrangedDeck(['AS', 'AD', 'AH', '2S', '3S', 'KH', '7C', '8C', 'KC'], ['KD', 'KS'], 'three');
+  assert.deepEqual(findJazzOptions(context).options[0].positions, [6, 51, 52]);
+  assert.deepEqual(findJazzOptions({ ...context, hand: 'four' }).options[0].positions, [6, 9, 51, 52]);
+  assert.equal(gradeJazz(context, [1, 2, 3]).optimal, false);
+  assert.equal(gradeJazz(context, [6, 9, 52]).valid, true);
+  assert.equal(gradeJazz(context, [6, 9, 51]).valid, false);
+  assert.equal(gradeJazz({ ...context, last: 51 }, [6, 9, 51]).valid, true);
+  assert.deepEqual(jazzScore([3, 5, 7, 52]).gaps, [2, 2]);
+  assert.deepEqual(jazzScore([3, 4, 7, 51, 52]).gaps, [1, 3]);
+  assert.deepEqual(jazzScore([3, 4, 7, 51]).gaps, [1, 3, 44]);
+  assert.deepEqual(findJazzOptions({ ...context, hand: 'pair' }).options[0].positions, [51, 52]);
+  assert.equal(findJazzOptions({ ...context, hand: 'pair', last: 52 }).count, 78);
+});
+
+test('Jazzing caps each suggested gap at 10 positions, while grading wider valid hands correctly', () => {
+  const head = ['AS', '2S', '2D', '2H', '9S', '7H', '8S', 'JC', 'KD', '4C', 'AD', '6S', '3D', '4D', 'KH', '5S', '6H', 'JH', '8H', '9H', 'AC'];
+  const context = arrangedDeck(head, ['KC', 'AH'], 'three');
+  assert.equal(jazzScore([1, 11, 21]).withinLimit, true);
+  assert.equal(jazzScore([1, 12]).withinLimit, false);
+  assert.deepEqual(findJazzOptions(context).options[0].positions, [1, 11, 52]);
+  assert.equal(gradeJazz(context, [1, 21, 52]).valid, true);
+  assert.equal(gradeJazz(context, [1, 21, 52]).optimal, false);
+  assert.deepEqual(gradeJazz(context, [1, 21, 52]).betterOptions[0].positions, [1, 11, 52]);
+  assert.equal(gradeJazz(context, [1, 1, 52]).valid, false);
+  assert.equal(gradeJazz(context, [1, 11, 50]).valid, false);
+  assert.equal(gradeJazz(context, null).valid, false);
+
+  const noClose = arrangedDeck(['AS', '2D', '3D', '4D', '5D', '6D', '7D', '8D', '9D', '10D', 'JD', 'AH'],
+    ['KC', 'QH'], 'pair');
+  assert.deepEqual(findJazzOptions(noClose), { count: 1, options: [] });
+  assert.equal(gradeJazz(noClose, [1, 12]).valid, true);
+  assert.equal(gradeJazz(noClose, null).valid, false);
+  assert.equal(gradeJazz({ ...noClose, last: 11 }, null).valid, true);
+});
+
+test('Specific Straight uses the same consecutively available bottom cards', () => {
+  const context = { ...arrangedDeck(['AS', '2S', '3S', '7D', '8H'], ['4S', '5H'], null), targetRanks: ['A', '2', '3', '4', '5'] };
+  const answer = [1, 2, 3, 51, 52];
+  assert.deepEqual(findJazzOptions(context).options[0].positions, answer);
+  const result = gradeJazz(context, answer);
+  assert.equal(result.optimal, true);
+  assert.deepEqual(result.score.gaps, [1, 1]);
+  assert.equal(result.score.bottomCount, 2);
 });
 
 test('Beyond generates unique, gradable prompts for every skill from each actual stack', () => {

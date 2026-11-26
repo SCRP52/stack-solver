@@ -51,8 +51,8 @@ export const beyondDetails = {
   split: ['Chia stack gốc thành các tụ liền nhau và chọn tụ của từng lá.', 'Divide the original stack into contiguous piles and classify each card.'],
   relations: ['Tìm lá gần nhất thỏa điều kiện màu và chất theo chiều của câu hỏi. Có vòng qua đầu hoặc đáy stack.', 'Find the nearest card matching the color or suit condition in the given direction, wrapping around the stack.'],
   knowledge: ['Đếm màu, chất hoặc tổng giá trị ở phía trên, phía dưới hoặc giữa các lá đã cho. A = 1, J = 11, Q = 12, K = 13.', 'Count colors, suits, or total ranks above, below or between the given cards. A = 1, J = 11, Q = 12, K = 13.'],
-  poker: ['Biết lá đáy sau khi cắt rồi chọn vị trí tạo thành tay bài. Lá đáy dùng được ở ngoài vùng. Pair, Two Pair, Three và Four chỉ cần các lá cùng giá trị đủ để tạo cụm.', 'Use the new bottom card to locate the hand. The bottom card is available outside the range. Pair, Two Pair, Three and Four only require the cards that form the group.'],
-  straight: ['Tìm đúng năm giá trị của sảnh đã cho sau khi cắt. Át có thể đứng đầu A–5 hoặc cuối 10–A. Có thể dùng lá đáy ngoài vùng.', 'Find the five ranks specified after a cut. Ace can start A–5 or end 10–A. The bottom card is available outside the range.'],
+  poker: ['Biết lá đáy sau khi cắt rồi chọn vị trí tạo thành tay bài. Có thể chọn 52 ngoài vùng, rồi chọn thêm 51. Pair, Two Pair, Three và Four chỉ cần các lá cùng giá trị đủ để tạo cụm.', 'Use the new bottom card to locate the hand. You can use 52 outside the range, then add 51. Pair, Two Pair, Three and Four only require the cards that form the group.'],
+  straight: ['Tìm đúng năm giá trị của sảnh đã cho sau khi cắt. Át có thể đứng đầu A–5 hoặc cuối 10–A. Có thể chọn 52 ngoài vùng, rồi chọn thêm 51.', 'Find the five ranks specified after a cut. Ace can start A–5 or end 10–A. You can use 52 outside the range, then add 51.'],
 };
 
 export function specialBeyondPrompt(question, language) {

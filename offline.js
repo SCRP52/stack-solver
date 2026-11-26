@@ -1,8 +1,8 @@
-const cacheName = 'stack-solver-v33';
+const cacheName = 'stack-solver-v34';
 const assets = ['./', './index.html', './app.css?v=33', './app.mjs', './i18n.mjs', './solver.mjs', './presets.mjs', './worker.mjs',
   './app.mjs?v=33', './solver.mjs?v=32', './worker.mjs?v=32', './i18n.mjs?v=32',
-  './trainer.html', './trainer.css?v=33', './trainer.mjs?v=33', './trainer-copy.mjs?v=30', './trainer-progress.mjs', './drills.mjs', './stack-library.mjs', './stack-csv.mjs',
-  './beyond.mjs', './beyond-copy.mjs', './jazzing.mjs', './drills.mjs?v=33'];
+  './trainer.html', './trainer.css?v=33', './trainer.mjs?v=34', './trainer-copy.mjs?v=30', './trainer-progress.mjs', './drills.mjs', './stack-library.mjs', './stack-csv.mjs',
+  './beyond.mjs?v=34', './beyond-copy.mjs?v=34', './jazzing.mjs?v=34', './drills.mjs?v=33'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(assets)).then(() => self.skipWaiting()));

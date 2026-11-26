@@ -1,6 +1,6 @@
 import { deckLength, cardLabel, redCard } from './stack-library.mjs';
 import { ranks } from './solver.mjs';
-import { hands, rotatedDeck, straights } from './jazzing.mjs';
+import { hands, rotatedDeck, straights } from './jazzing.mjs?v=34';
 
 export const beyond = {
   recall: ['earlier', 'first-card', 'last-card', 'recall-up', 'recall-down', 'recall-progressive', 'recall-full'],

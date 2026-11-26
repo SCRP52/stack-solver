@@ -8,20 +8,32 @@ const ascending = (a, b) => a - b;
 const rankKey = values => [...values].sort().join(' ');
 const straightKeys = new Set(straights.map(rankKey));
 const royalKey = rankKey(straights.at(-1));
+export const maxJazzGap = 10;
 
 export function rotatedDeck(cards, bottom) {
   const cut = cards.indexOf(bottom) + 1;
   return [...cards.slice(cut), ...cards.slice(0, cut)];
 }
 
-export const jazzPositions = ({ first, last, cards }) => [...Array.from({ length: last - first + 1 }, (_, i) => first + i),
-  ...(last < cards.length ? [cards.length] : [])];
+const inJazzRange = ({ first, last }, position) => position >= first && position <= last;
+export const requiresBottom = (context, position) => position === context.cards.length - 1 && !inJazzRange(context, position);
+export const jazzPositions = context => {
+  const { first, last, cards } = context;
+  const positions = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  for (const position of [cards.length - 1, cards.length]) {
+    if (!inJazzRange(context, position)) positions.push(position);
+  }
+  return positions.sort(ascending);
+};
 export const jazzLength = context => context.targetRanks?.length ?? hands[context.hand];
 
 export function validJazz(context, positions) {
-  const { cards, hand, targetRanks, first, last } = context;
+  const { cards, hand, targetRanks } = context;
+  const bottom = cards.length;
+  const usesBottom = positions.includes(bottom);
   if (positions.length !== jazzLength(context) || new Set(positions).size !== positions.length ||
-    positions.some(position => !Number.isInteger(position) || position !== cards.length && (position < first || position > last))) return false;
+    positions.some(position => !Number.isInteger(position) ||
+      !inJazzRange(context, position) && position !== bottom && !(usesBottom && requiresBottom(context, position)))) return false;
   const selected = positions.map(position => cards[position - 1]);
   const values = selected.map(rankOf);
   const valuesKey = rankKey(values);
@@ -39,13 +51,16 @@ export function validJazz(context, positions) {
 }
 
 export function jazzScore(positions, bottom = 52) {
-  const top = positions.filter(position => position !== bottom).sort(ascending);
-  if (top.length < 2) return [top[0] ?? Infinity, 0, 0];
-  const gaps = top.slice(1).map((position, i) => position - top[i]);
-  return [top[0], top.at(-1) - top[0], Math.max(...gaps) - Math.min(...gaps)];
+  const usesBottom = positions.includes(bottom);
+  const upper = positions.filter(position => position !== bottom && !(usesBottom && position === bottom - 1)).sort(ascending);
+  const bottomCount = positions.length - upper.length;
+  const gaps = upper.slice(1).map((position, i) => position - upper[i]);
+  const longest = gaps.length ? Math.max(...gaps) : 0;
+  const spread = gaps.length ? longest - Math.min(...gaps) : 0;
+  return { gaps, longest, spread, bottomCount, withinLimit: longest <= maxJazzGap };
 }
 
-export function compareScore(a, b) {
+function compareScore(a, b) {
   for (let i = 0; i < a.length; i++) {
     if (a[i] < b[i]) return -1;
     if (a[i] > b[i]) return 1;
@@ -110,47 +125,43 @@ function* jazzCandidates(context) {
 }
 
 const compareSolutions = (a, b) => compareScore(a.rank, b.rank) || compareScore(a.positions, b.positions);
-const bottomTolerance = { first: 1, span: 2 };
-
-function rankedScore(positions, score, bottom, baseline) {
-  if (!positions.includes(bottom)) return [1, ...score];
-  const competitive = !baseline ||
-    score[0] <= baseline[0] + bottomTolerance.first && score[1] <= baseline[1] + bottomTolerance.span;
-  return [competitive ? 0 : 2, ...score];
+function rankedScore(score) {
+  const span = score.gaps.reduce((total, gap) => total + gap, 0);
+  return [-score.bottomCount, score.spread, score.longest, span];
 }
 
 export function findJazzOptions(context, limit = 3) {
   const options = [];
   const bottom = context.cards.length;
-  let baseline = null;
   let count = 0;
   for (const positions of jazzCandidates(context)) {
+    if (requiresBottom(context, bottom - 1) && positions.includes(bottom - 1) && !positions.includes(bottom)) continue;
     count++;
-    if (positions.includes(bottom)) continue;
+    if (!limit) continue;
     const score = jazzScore(positions, bottom);
-    if (!baseline || compareScore(score, baseline) < 0) baseline = score;
-  }
-  if (!limit) return { options, count, baseline };
-  for (const positions of jazzCandidates(context)) {
-    const score = jazzScore(positions, bottom);
-    const rank = rankedScore(positions, score, bottom, baseline);
+    if (!score.withinLimit) continue;
+    const rank = rankedScore(score);
     if (options.length === limit && compareScore(rank, options.at(-1).rank) > 0) continue;
     const option = { positions: positions.sort(ascending), score, rank };
     options.push(option);
     options.sort(compareSolutions);
     if (options.length > limit) options.pop();
   }
-  return { options, count, baseline };
+  return { options, count };
 }
 
 export function gradeJazz(context, positions) {
   const found = findJazzOptions(context);
   if (positions === null) return { ...found, valid: found.count === 0, noSolution: true };
   const valid = validJazz(context, positions);
-  const score = valid ? jazzScore(positions, context.cards.length) : null;
-  const best = found.options[0];
-  const rank = valid ? rankedScore(positions, score, context.cards.length, found.baseline) : null;
-  const comparison = valid && best ? compareScore(rank, best.rank) : null;
-  return { ...found, valid, score, optimal: comparison === 0, betterOptions: valid && comparison > 0
-    ? found.options.filter(option => compareScore(option.rank, rank) < 0) : valid ? [] : found.options };
+  if (!valid) return { ...found, valid, betterOptions: found.options };
+
+  const bottom = context.cards.length;
+  const score = jazzScore(positions, bottom);
+  if (!score.withinLimit) return { ...found, valid, score, optimal: false, betterOptions: found.options };
+
+  const rank = rankedScore(score);
+  const optimal = compareScore(rank, found.options[0].rank) === 0;
+  const betterOptions = found.options.filter(option => compareScore(option.rank, rank) < 0);
+  return { ...found, valid, score, optimal, betterOptions };
 }

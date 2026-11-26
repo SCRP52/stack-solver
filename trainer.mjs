@@ -3,9 +3,9 @@ import { message } from './i18n.mjs';
 import { ranks } from './solver.mjs';
 import { advanced, answerChoices, basic, grade, questionSet, stackModel } from './drills.mjs?v=33';
 import { drillCopy, drillDetails, groupCopy, groupDetails } from './trainer-copy.mjs?v=30';
-import { beyond, beyondQuestions, isJazzing, isRecallOrder, isSplit, parseSplit, splitDefaults } from './beyond.mjs';
-import { beyondDetails, beyondDrills, beyondGroups, handNames, specialBeyondPrompt } from './beyond-copy.mjs';
-import { findJazzOptions, gradeJazz, jazzLength, jazzPositions } from './jazzing.mjs';
+import { beyond, beyondQuestions, isJazzing, isRecallOrder, isSplit, parseSplit, splitDefaults } from './beyond.mjs?v=34';
+import { beyondDetails, beyondDrills, beyondGroups, handNames, specialBeyondPrompt } from './beyond-copy.mjs?v=34';
+import { findJazzOptions, gradeJazz, jazzLength, jazzPositions, maxJazzGap, requiresBottom } from './jazzing.mjs?v=34';
 import { activeStackKey, readProgress, saveProgress, slowCards, summarize, weakCards } from './trainer-progress.mjs';
 import { exportStackCsv, importStackCsv } from './stack-csv.mjs';
 
@@ -517,23 +517,30 @@ function setupBeyondBoard(prompt) {
     if (none) positions.clear();
     refresh();
   });
-  const buttons = jazzPositions(prompt.jazz).map(position => [position, answerButton(
-    String(position), position === bottom ? 'jazz-bottom' : '', () => {
+  const buttons = jazzPositions(prompt.jazz).map(position => {
+    const bottomLabel = position === bottom ? t('Đáy', 'Bottom')
+      : position === bottom - 1 ? t('Sát đáy', 'Above bottom') : '';
+    const button = answerButton(String(position), bottomLabel ? 'jazz-bottom' : '', () => {
       none = false;
-      if (positions.has(position)) positions.delete(position);
-      else if (positions.size < size) positions.add(position);
+      if (positions.has(position)) {
+        positions.delete(position);
+        if (position === bottom && requiresBottom(prompt.jazz, bottom - 1)) positions.delete(bottom - 1);
+      } else if (positions.size < size) positions.add(position);
       refresh();
-    }, position === bottom ? t(`${bottom} · Đáy`, `${bottom} · Bottom`) : String(position),
-  )]);
-  const bottomButton = buttons.find(([position]) => position === bottom)?.[1];
-  bottomButton?.append(element('small', t('Đáy', 'Bottom')));
+    }, bottomLabel ? `${position} · ${bottomLabel}` : String(position));
+    if (bottomLabel) button.append(element('small', bottomLabel));
+    return [position, button];
+  });
   board.prepend(count);
   grid.append(...buttons.map(([, button]) => button));
   board.append(noSolution);
 
   function refresh() {
     count.textContent = t(`Đã chọn ${positions.size}/${size} vị trí`, `${positions.size}/${size} positions selected`);
-    for (const [position, button] of buttons) button.setAttribute('aria-pressed', positions.has(position));
+    for (const [position, button] of buttons) {
+      button.setAttribute('aria-pressed', positions.has(position));
+      button.disabled = requiresBottom(prompt.jazz, position) && !positions.has(bottom);
+    }
     noSolution.setAttribute('aria-pressed', none);
     submit.disabled = !none && positions.size !== size;
   }
@@ -683,20 +690,31 @@ function showQuestion() {
 
 function jazzReview(prompt, result) {
   const review = element('div', undefined, 'jazz-review');
+  const spacing = score => {
+    const gaps = score.gaps.length
+      ? t(`Khoảng cách ${score.gaps.join('–')}`, `Gaps ${score.gaps.join('–')}`)
+      : t('Không có khoảng cách cần tính', 'No gaps to measure');
+    const bottom = score.bottomCount === 1 ? t('52 tính sẵn', '52 covered')
+      : score.bottomCount === 2 ? t('51 và 52 tính sẵn', '51 and 52 covered') : '';
+    return bottom ? `${gaps} · ${bottom}` : gaps;
+  };
   if (result.score) {
-    const [first, span, spread] = result.score;
-    review.append(element('small', t(
-      `${result.optimal ? 'Phương án tối ưu' : 'Phương án hợp lệ'} · Lá đầu ${first} · Độ trải ${span} · Chênh lệch khoảng cách ${spread}`,
-      `${result.optimal ? 'Top-ranked answer' : 'Valid answer'} · First card ${first} · Span ${span} · Gap spread ${spread}`,
-    )));
+    const label = result.optimal ? t('Phương án tối ưu', 'Top-ranked answer') : t('Phương án hợp lệ', 'Valid answer');
+    const overLimit = result.score.withinLimit ? '' :
+      t(` · Có khoảng cách vượt ${maxJazzGap} vị trí`, ` · A gap exceeds ${maxJazzGap} positions`);
+    review.append(element('small', `${label} · ${spacing(result.score)}${overLimit}`));
   }
   if (!result.count) review.append(element('small', t('Không có phương án hợp lệ trong vùng.', 'There is no valid hand in this range.')));
+  else if (!result.options.length) review.append(element('small', t(
+    `Các cụm hợp lệ trong vùng đều có khoảng cách vượt ${maxJazzGap} vị trí.`,
+    `Every valid hand in this range has a gap over ${maxJazzGap} positions.`,
+  )));
   const alternatives = result.betterOptions ?? result.options;
   if (alternatives.length) {
-    review.append(element('strong', result.score ? t('Phương án thuận tiện hơn', 'More convenient options') : t('Phương án hợp lệ', 'Valid options')));
-    for (const { positions } of alternatives) {
+    review.append(element('strong', result.score ? t('Phương án thuận tiện hơn', 'More convenient options') : t('Phương án gợi ý', 'Suggested answers')));
+    for (const { positions, score } of alternatives) {
       const line = positions.map(position => `${position} ${cardLabel(prompt.jazz.cards[position - 1])}`).join(' · ');
-      review.append(element('small', line));
+      review.append(element('small', `${line} · ${spacing(score)}`));
     }
   }
   return review;

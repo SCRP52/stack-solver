@@ -146,7 +146,7 @@ function fillSkills(value = 'all') {
     const name = t(...groupCopy[key]);
     const group = element('optgroup');
     group.label = name;
-    group.append(new Option(t(`Trộn ${name}`, `Mix ${name}`), `group:${key}`));
+    if (skills.length > 1) group.append(new Option(t(`Trộn ${name}`, `Mix ${name}`), `group:${key}`));
     const choices = key === 'distance' ? ['count-steps', 'find-by-steps'] : key === 'quartet' ? ['quartet-numbers', ...skills] : skills;
     for (const kind of choices) {
       const combined = combinedDrills[kind];
@@ -183,7 +183,9 @@ function renderSetup() {
   $('order-field').hidden = trial;
   $('focus-field').hidden = trial;
   if (!beyond) {
-    const count = currentSkills().reduce((sum, kind) => sum + (progress?.[kind]?.total ?? 0), 0);
+    const skills = currentSkills();
+    $('answer-mode-field').hidden = skills.every(skill => skill === 'restack');
+    const count = skills.reduce((sum, kind) => sum + (progress?.[kind]?.total ?? 0), 0);
     $('practice-status').textContent = count ? t(`Đã trả lời ${count} câu ở các bài đã chọn.`, `${count} answers recorded for the selected drills.`) : '';
   }
   if (view === 'learn') renderStudy();
@@ -270,6 +272,39 @@ function renderChoices(prompt) {
     button.append(element('strong', letter), value);
     return button;
   }));
+}
+
+function setupRestack(prompt) {
+  const selected = [];
+  run.restack = selected;
+  const source = new Map(prompt.shown.map(card => {
+    const style = redCard(card) ? 'restack-card answer-red' : 'restack-card';
+    const button = answerButton(cardLabel(card), style, () => {
+      selected.push(card);
+      refresh();
+      [...source.values()].find(item => !item.disabled)?.focus({ preventScroll: true });
+    });
+    return [card, button];
+  }));
+
+  function refresh() {
+    const placed = new Set(selected);
+    for (const [card, button] of source) button.disabled = placed.has(card);
+    $('restack-answer').replaceChildren(...selected.map((card, i) => {
+      const label = cardLabel(card);
+      const style = redCard(card) ? 'restack-card answer-red' : 'restack-card';
+      return answerButton(label, style, () => {
+        selected.splice(i, 1);
+        refresh();
+        source.get(card).focus({ preventScroll: true });
+      }, t(`Ô ${i + 1}, bỏ ${label} khỏi thứ tự`, `Entry ${i + 1}, remove ${label} from your order`));
+    }));
+    $('restack-count').textContent = `${selected.length} / ${prompt.answer.length}`;
+    $('submit-answer').disabled = selected.length !== prompt.answer.length;
+  }
+
+  $('restack-source').replaceChildren(...source.values());
+  refresh();
 }
 
 function manualValues({ numeric, entries }) {
@@ -366,7 +401,9 @@ function setupManual(prompt) {
 
 function showQuestion() {
   const prompt = run.questions[run.index];
+  const restack = prompt.kind === 'restack';
   run.answered = false;
+  run.restack = null;
   $('session-mode').textContent = run.trial ? t('Thi', 'Time Trial') : t('Tập', 'Trainer');
   $('question-count').textContent = run.trial ? `${run.count + 1} / ${run.limit}` : t(`Câu ${run.count + 1}`, `Question ${run.count + 1}`);
   $('trial-time').hidden = !run.trial;
@@ -374,15 +411,17 @@ function showQuestion() {
   if (run.trial) { $('trial-progress').max = run.limit; $('trial-progress').value = run.count; }
   $('question-skill').textContent = drillName(prompt.kind);
   $('question-text').textContent = promptText(prompt);
-  $('question-cards').replaceChildren(...prompt.shown.map(cardFace));
-  $('question-cards').hidden = !prompt.shown.length;
+  $('question-cards').replaceChildren(...(restack ? [] : prompt.shown.map(cardFace)));
+  $('question-cards').hidden = restack || !prompt.shown.length;
   $('answer-form').hidden = false;
-  $('answer-choices').hidden = !run.choice;
-  $('answer-pad').hidden = run.choice;
-  $('submit-answer').hidden = run.choice;
+  $('answer-choices').hidden = restack || !run.choice;
+  $('answer-pad').hidden = restack || run.choice;
+  $('restack-board').hidden = !restack;
+  $('submit-answer').hidden = !restack && run.choice;
   $('next-question').hidden = true;
   $('feedback').hidden = true;
-  if (run.choice) renderChoices(prompt);
+  if (restack) setupRestack(prompt);
+  else if (run.choice) renderChoices(prompt);
   else setupManual(prompt);
   run.questionStarted = performance.now();
   $('question-text').focus({ preventScroll: true });
@@ -401,7 +440,10 @@ function record(correct, values = [], skipped = false) {
   run.answered = true;
   run.count++;
   const result = { prompt, correct, values, skipped, ms: performance.now() - run.questionStarted };
-  try { progress = saveProgress(order, prompt, result); } catch { storageError(); }
+  const trackedPrompt = run.restack && !correct && !skipped
+    ? { ...prompt, focus: prompt.answer.filter((card, i) => card !== run.restack[i]) }
+    : prompt;
+  try { progress = saveProgress(order, trackedPrompt, result); } catch { storageError(); }
   if (run.trial) {
     run.results.push(result);
     if (run.count >= run.limit) {
@@ -518,7 +560,8 @@ for (const id of ['skill', 'practice-focus']) $(id).addEventListener('change', r
 $('practice-form').addEventListener('submit', newRound);
 $('answer-form').addEventListener('submit', event => {
   event.preventDefault();
-  if (run && !run.choice) submitAnswer(manualValues(run.manual));
+  if (run?.restack) submitAnswer(run.restack);
+  else if (run && !run.choice) submitAnswer(manualValues(run.manual));
 });
 $('skip-answer').addEventListener('click', () => record(false, [], true));
 $('next-question').addEventListener('click', advanceQuestion);

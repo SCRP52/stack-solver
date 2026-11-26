@@ -60,6 +60,15 @@
 .answer-red { color: var(--accent); }
 .answer-pad-tools { display: flex; justify-content: end; gap: 5px; margin-top: 5px; }
 .answer-pad-tools .answer-key { min-width: 48px; }
+#restack-board { max-width: 42rem; }
+#restack-board h3 { font-size: .88rem; margin: 10px 0 5px; }
+.restack-heading { display: flex; align-items: baseline; justify-content: space-between; }
+#restack-count { font-size: .85rem; font-variant-numeric: tabular-nums; }
+.restack-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.restack-answer { min-height: 48px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; }
+.restack-card { min-width: 44px; min-height: 44px; font-size: .92rem; padding: 4px; }
+.restack-card:disabled { opacity: .24; }
+#restack-answer .restack-card { background: var(--accent-wash); border-color: var(--accent-line); }
 #feedback { margin-top: 16px; padding: 12px; border: 1px solid var(--line); background: var(--well); border-radius: 8px; line-height: 1.45; }
 #feedback[data-result=wrong] { border-color: var(--accent-line); }
 .trial-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; }

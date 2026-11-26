@@ -106,7 +106,7 @@
                 <label for="practice-focus" data-en="Review focus">Ôn tập</label>
                 <select id="practice-focus"><option value="all" data-en="All cards">Tất cả lá</option><option value="weak" data-en="Frequently missed">Lá hay sai</option><option value="slow" data-en="Slow answers">Lá trả lời chậm</option></select>
               </div>
-              <div>
+              <div id="answer-mode-field">
                 <label for="answer-mode" data-en="Answer mode">Cách trả lời</label>
                 <select id="answer-mode"><option value="choice" data-en="Choose A/B/C">Chọn A/B/C</option><option value="manual" selected data-en="On-screen input">Nhập trên màn hình</option></select>
               </div>
@@ -133,6 +133,15 @@
             <div id="answer-pad" class="answer-pad">
               <div id="answer-slots" class="answer-slots"></div>
               <div id="answer-keys"></div>
+            </div>
+            <div id="restack-board" hidden>
+              <div class="restack-heading">
+                <h3 id="restack-answer-label" data-en="Your order">Thứ tự đã xếp</h3>
+                <span id="restack-count" class="muted" role="status"></span>
+              </div>
+              <div id="restack-answer" class="restack-grid restack-answer" role="group" aria-labelledby="restack-answer-label"></div>
+              <h3 id="restack-source-label" data-en="Shuffled cards">Bài đã xáo</h3>
+              <div id="restack-source" class="restack-grid" role="group" aria-labelledby="restack-source-label"></div>
             </div>
             <div class="actions session-actions">
               <button class="primary" id="submit-answer" data-en="Submit">Trả lời</button>

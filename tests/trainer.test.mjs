@@ -138,7 +138,7 @@ test('Missing Card hides the range and supports segments from 5 to 26 cards', ()
 test('A/B/C offers three distinct options with exactly one correct answer', () => {
   const cards = presets[4].cards;
   const model = stackModel(cards);
-  const skills = [...basic, ...Object.values(advanced).flat()];
+  const skills = [...basic, ...Object.values(advanced).flat()].filter(kind => kind !== 'restack');
   const pool = questionSet(model, skills, { sequential: true });
   for (const q of pool) {
     const options = answerChoices(q, cards, {}, () => 0.65);
@@ -149,6 +149,23 @@ test('A/B/C offers three distinct options with exactly one correct answer', () =
   }
   const position = buildQuestion(model, 'card-position', 2);
   assert.deepEqual(answerChoices(position, cards, { start: 2, end: 4 }).flat().sort(), [2, 3, 4]);
+});
+
+test('Restack covers distinct shuffled segments and grades the exact order', () => {
+  const { cards } = presets[4];
+  const pool = questionSet(stackModel(cards), advanced.restack, { random: () => 0.99 });
+  const lengths = [...new Set(pool.map(q => q.shown.length))].sort((a, b) => a - b);
+  assert.deepEqual(lengths, Array.from({ length: 22 }, (_, i) => i + 5));
+  assert.equal(pool.length, 825);
+  assert.equal(new Set(pool.map(q => q.answer.join(' '))).size, pool.length);
+  for (const q of pool) {
+    const start = cards.indexOf(q.answer[0]);
+    assert.deepEqual(q.answer, cards.slice(start, start + q.shown.length));
+    assert.deepEqual(new Set(q.shown), new Set(q.answer));
+    assert.equal(grade(q, q.shown), false);
+    assert.equal(grade(q, q.answer), true);
+    assert.equal(grade(q, q.answer.slice(1)), null);
+  }
 });
 
 test('practice progress is isolated by exact stack order and by drill', () => {

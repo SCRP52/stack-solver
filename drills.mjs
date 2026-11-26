@@ -8,6 +8,7 @@ export const advanced = {
   distance: ['forward-distance', 'backward-distance', 'forward-offset', 'backward-offset'],
   relative: ['relative-position', 'bottom-position', 'bottom-card'],
   missing: ['single-missing', 'multiple-missing'],
+  restack: ['restack'],
 };
 
 const mod = value => (value % size + size) % size;
@@ -98,11 +99,13 @@ export function buildQuestion(model, skill, index, variant = 0, random = Math.ra
     case 'relative-position': return ask([cardLabel(bottom), face], positionAfterCut(index, cut), [card, bottom]);
     case 'bottom-position': return ask([face], fromBottom);
     case 'bottom-card': return ask([fromBottom], card);
+    case 'restack':
     case 'single-missing':
     case 'multiple-missing': {
       const segmentSize = minSegmentSize + variant;
       const start = Math.min(index, size - segmentSize);
       const segment = cards.slice(start, start + segmentSize);
+      if (skill === 'restack') return ask([], segment, segment, { shown: shuffledCards(segment, random) });
       const interiorSize = segmentSize - 2;
       const first = 1 + Math.floor(random() * interiorSize);
       const gaps = [first];
@@ -112,9 +115,7 @@ export function buildQuestion(model, skill, index, variant = 0, random = Math.ra
       }
       const missing = gaps.map(i => segment[i]);
       const visible = segment.filter((_, i) => !gaps.includes(i));
-      const shown = shuffle([...visible], random);
-      if (shown.every((card, i) => card === visible[i])) shown.push(shown.shift());
-      return ask([missing.length], missing, missing, { unordered: true, shown });
+      return ask([missing.length], missing, missing, { unordered: true, shown: shuffledCards(visible, random) });
     }
     default: throw new RangeError(`Unknown drill ${skill}`);
   }
@@ -128,15 +129,22 @@ function shuffle(items, random) {
   return items;
 }
 
+function shuffledCards(cards, random) {
+  const shown = shuffle([...cards], random);
+  if (shown.every((card, i) => card === cards[i])) shown.push(shown.shift());
+  return shown;
+}
+
 const rankOnly = new Set(['quartet-positions', 'quartet-order']);
 const fixed = new Set([...basic, ...rankOnly, 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank', 'mate-position', 'mate-distance', 'bottom-position', 'bottom-card']);
 const fullVariants = new Set(['cut-count', 'cut-card']);
+const segmentSkills = new Set([...advanced.missing, ...advanced.restack]);
 
 export function questionSet(model, skills, { start = 1, end = size, random = Math.random, sequential = false, eligible = () => true } = {}) {
   const unique = new Set();
   const buckets = skills.map(skill => {
     const seenRanks = new Set();
-    const isMissing = advanced.missing.includes(skill);
+    const usesSegment = segmentSkills.has(skill);
     const standardVariants = fixed.has(skill) ? 1 : fullVariants.has(skill) ? size : size - 1;
     const items = [];
     for (let index = start - 1; index < end; index++) {
@@ -148,11 +156,11 @@ export function questionSet(model, skills, { start = 1, end = size, random = Mat
         if (seenRanks.has(key)) continue;
         seenRanks.add(key);
       }
-      const variants = isMissing ? Math.min(maxSegmentSize, end - index) - minSegmentSize + 1 : standardVariants;
+      const variants = usesSegment ? Math.min(maxSegmentSize, end - index) - minSegmentSize + 1 : standardVariants;
       for (let variant = 0; variant < variants; variant++) {
         const prompt = buildQuestion(model, skill, index, variant, random);
         if (!prompt || !eligible(prompt)) continue;
-        const shown = isMissing ? [...prompt.shown].sort() : prompt.shown;
+        const shown = usesSegment ? [...prompt.shown].sort() : prompt.shown;
         const key = JSON.stringify([prompt.kind, prompt.args, shown]);
         if (unique.has(key)) continue;
         unique.add(key);

@@ -23,9 +23,11 @@ export const drillCopy = {
   'bottom-card': ['Lá tính từ đáy', 'Bottom Card', 'Lá thứ {0} tính từ đáy stack là lá nào?', 'Which card is at position {0} from the bottom?'],
   'single-missing': ['Thiếu một lá', 'Single Missing', 'Thiếu lá nào?', 'Which card is missing?'],
   'multiple-missing': ['Thiếu hai lá', 'Two Missing', 'Thiếu {0} lá nào?', 'Which {0} cards are missing?'],
+  restack: ['Xếp lại theo stack', 'Restack', 'Chạm từng lá để xếp theo thứ tự stack từ trên xuống.', 'Tap the cards in stack order from top to bottom.'],
 };
 
 export const groupCopy = {
   position: ['Vị trí', 'Position'], neighbour: ['Lá liền kề', 'Neighbour'], acaan: ['ACAAN', 'ACAAN'], quartet: ['Tứ quý', 'Quartet'],
   mate: ['Mate', 'Mate'], distance: ['Khoảng cách', 'Distance'], relative: ['Vị trí tương đối', 'Relative Position'], missing: ['Lá bị thiếu', 'Missing Card'],
+  restack: ['Restack', 'Restack'],
 };

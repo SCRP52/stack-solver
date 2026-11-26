@@ -47,14 +47,15 @@
             <label><input type="checkbox" id="in" data-lock checked> Faro in</label>
             <label><input type="checkbox" id="near" data-lock checked> Faro lệch</label>
             <label><input type="checkbox" id="cut" data-lock checked> Cut</label>
-            <label><input type="checkbox" id="triple" data-lock> Triple cut</label>
+            <label><input type="checkbox" id="multi-cut-overhand" data-lock> Multi Cut overhand</label>
+            <label><input type="checkbox" id="multi-cut-reorder" data-lock> Multi Cut gom tự do</label>
             <label><input type="checkbox" id="run" data-lock checked> Run</label>
             <label><input type="checkbox" id="reverse" data-lock checked> Đảo đoạn đầu</label>
             <label><input type="checkbox" id="cull" data-lock checked> Cull</label>
             <label><input type="checkbox" id="reverse-cull" data-lock checked> Reverse cull</label>
             <label><input type="checkbox" id="deal" data-lock> Chia và gom tụ</label>
           </div>
-          <p class="hint">Cull lấy tối đa 5 lá trong một lượt xòe, nạp từng lá sâu hơn vị trí cũ. Lá lấy trước phải nạp trước. Reverse cull đưa đúng lá đáy lên trên. Giữa hai lượt cull cần có một nước khác.</p>
+          <p class="hint">Cull lấy tối đa 5 lá trong một lượt xòe. Các lá có thể nằm rải rác. Nạp từng lá sâu hơn vị trí cũ theo thứ tự đã lấy. Reverse cull đưa đúng lá đáy lên trên. Giữa hai lượt cull cần có một nước khác.</p>
           <div class="fields">
             <div><label for="cull-max">Số lá mỗi cull</label><select id="cull-max" data-lock><option value="1">Tối đa 1</option><option value="2">Tối đa 2</option><option value="3">Tối đa 3</option><option value="4">Tối đa 4</option><option value="5" selected>Tối đa 5</option></select></div>
             <div><label for="run-max">Số lá tối đa khi run / đảo</label><input id="run-max" data-lock type="number" min="2" max="52" value="39" inputmode="numeric"></div>
@@ -68,8 +69,9 @@
             <label><input type="checkbox" id="cull-deeper" data-lock checked> Cho cull nạp vào giữa bộ</label>
           </div>
           <p class="hint">Chia theo vòng, đặt mỗi lá lên trên tụ đang chia. Gom tự do cho phép đổi thứ tự các tụ. Kết quả sẽ ghi thứ tự gom cụ thể. Tối đa 10 tụ.</p>
-          <label for="triple-splits">Mốc triple cut</label>
-          <input id="triple-splits" data-lock value="13,26,39" type="text">
+          <label for="multi-cut-splits">Mốc cắt Multi Cut</label>
+          <input id="multi-cut-splits" data-lock value="13,26,39" type="text" aria-describedby="multi-cut-help">
+          <p class="hint" id="multi-cut-help">Nhập từ 2 đến 9 mốc, cách nhau bằng dấu phẩy. Hai kiểu đều cắt 3–10 cọc liền. Overhand đặt từng cọc lên trên cọc vừa lấy. Gom tự do xếp các cọc theo thứ tự solver tìm được.</p>
           <p class="hint">Run rút từng lá rồi đặt phần còn lại lên trên tụ run. Mỗi thao tác tính một nước.</p>
         </details>
         <p id="error" class="error" role="alert" hidden></p>
@@ -90,6 +92,10 @@
             <div class="solution-top">
               <div><strong id="move-total" class="move-total">0</strong><span class="muted"> nước</span></div>
               <button type="button" class="secondary" id="copy">Chép chuỗi</button>
+            </div>
+            <div id="route-picker" hidden>
+              <label for="route">Phương án</label>
+              <select id="route"></select>
             </div>
             <div id="study" class="study" hidden>
               <div class="study-controls">

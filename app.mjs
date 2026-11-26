@@ -4,13 +4,15 @@ import { findPreset, getPreset, presets } from './presets.mjs';
 const $ = id => document.getElementById(id);
 const storageKey = 'stack-solver-history-v1';
 const suits = { S: '♠', D: '♦', C: '♣', H: '♥' };
-const families = ['out', 'in', 'near', 'cut', 'triple', 'run', 'reverse', 'cull', 'deal'];
-const switches = [['faro-offsets', 'faroOffsets'], ['cull-deeper', 'cullDeeper'], ['reverse-cull', 'reverseCull']];
+const families = ['out', 'in', 'near', 'cut', 'run', 'reverse', 'cull', 'deal'];
+const extraFamilies = [['reverse-cull', 'reverseCull'], ['multi-cut-overhand', 'multiCutOverhand'], ['multi-cut-reorder', 'multiCutReorder']];
+const switches = [['faro-offsets', 'faroOffsets'], ['cull-deeper', 'cullDeeper'], ...extraFamilies];
 const numeric = [['faro-window', 'faroWindow', 1, 25], ['run-max', 'runMax', 2, 52],
   ['cull-max', 'cullMax', 1, 5], ['deal-max', 'dealMax', 2, 10]];
 let worker;
 let session;
 let currentStep = 0;
+let currentRoute = 0;
 let stepButtons = [];
 
 function readHistory() {
@@ -107,7 +109,12 @@ function instructions(step) {
   if (step.kind === 'cut') return `Chuyển ${p.n} lá đầu xuống cuối bộ.`;
   if (step.kind === 'run') return `Run ${p.n} lá đầu, rồi đặt phần còn lại lên trên tụ vừa run.`;
   if (step.kind === 'reverse') return `Run ${p.n} lá đầu để đảo thứ tự, rồi đặt phần còn lại xuống dưới tụ vừa run.`;
-  if (step.kind === 'triple') return `Chia sau lá ${p.a} và ${p.b}, rồi ráp ba tụ theo thứ tự ${p.order}.`;
+  if (step.kind === 'triple') return `Cắt sau lá ${p.a} và ${p.b}, rồi gom ba cọc theo thứ tự ${p.order}.`;
+  if (step.kind === 'multi-cut') {
+    const cut = `Cắt sau các lá ${p.splits.join(', ')}. Đánh số cọc theo thứ tự từ đầu bộ.`;
+    const method = p.overhand ? ' Đặt từng cọc vừa lấy lên trên cọc trước, kể cả cọc cuối.' : '';
+    return `${cut}${method} Thứ tự từ trên xuống sau khi gom là ${p.order.join(' → ')}.`;
+  }
   if (step.kind === 'deal') return `Chia lần lượt từ tụ 1 tới tụ ${p.count} rồi lặp lại. Gom theo thứ tự từ đầu bộ xuống: ${p.order.join(' → ')}.`;
   if (step.kind === 'weave') return `Chia ${p.split}/${52 - p.split}. A là tụ trên, B là tụ dưới. Xen theo thứ tự ${p.mask.match(/.{1,13}/g).join(' ')}.`;
   const larger = p.spare === 'A' ? 'tụ trên' : 'tụ dưới';
@@ -118,7 +125,7 @@ function instructions(step) {
 }
 
 function showStep(number) {
-  const { startCards, steps } = session;
+  const steps = session.routes?.[currentRoute] ?? session.steps;
   currentStep = number;
   const step = steps[number - 1];
   $('step-number').textContent = number ? `Nước ${number}/${steps.length}` : 'Bộ xuất phát';
@@ -134,7 +141,7 @@ function showStep(number) {
   }));
   $('previous').disabled = !number;
   $('next').disabled = number === steps.length;
-  $('deck-grid').replaceChildren(...(step?.deck ?? startCards).map(card => {
+  $('deck-grid').replaceChildren(...(step?.deck ?? session.startCards).map(card => {
     const tile = document.createElement('span');
     tile.className = /[DH]$/.test(card) ? 'card red' : 'card';
     tile.textContent = cardText(card);
@@ -145,11 +152,18 @@ function showStep(number) {
 
 function renderSolution() {
   if (!session.steps) { $('solution').hidden = true; return; }
+  const routes = session.routes?.length ? session.routes : [session.steps];
+  const steps = routes[currentRoute];
   $('solution').hidden = false;
   $('study').hidden = false;
-  $('move-total').textContent = session.steps.length;
-  $('copy').disabled = session.steps.length === 0;
-  stepButtons = session.steps.map((step, index) => {
+  $('route-picker').hidden = routes.length < 2;
+  if (routes.length > 1) {
+    $('route').replaceChildren(...routes.map((route, index) => new Option(`${index + 1} · ${route.length} nước`, index)));
+    $('route').value = currentRoute;
+  }
+  $('move-total').textContent = steps.length;
+  $('copy').disabled = steps.length === 0;
+  stepButtons = steps.map((step, index) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'quiet';
@@ -168,7 +182,17 @@ function renderSolution() {
     item.append(button);
     return item;
   }));
-  showStep(Math.min(currentStep, session.steps.length));
+  showStep(Math.min(currentStep, steps.length));
+}
+
+function receiveRoutes({ steps, routes = steps ? [steps] : [] }) {
+  const previous = session.routes?.[currentRoute];
+  session.steps = steps;
+  session.routes = routes;
+  if (!currentRoute || !previous) return;
+  const index = routes.findIndex(route => route.length === previous.length && route.every((step, i) => step.label === previous[i].label));
+  currentRoute = Math.max(0, index);
+  if (index < 0) currentStep = 0;
 }
 
 function formatTime(seconds) {
@@ -191,9 +215,10 @@ function finish(stopped = false) {
   setLocked(false);
   if (session.steps) {
     $('status').textContent = session.optimal ? 'Đã chứng minh' : 'Chuỗi tốt nhất đã tìm';
+    const count = session.routes?.length || 1;
     $('progress-message').textContent = session.optimal
-      ? 'Đây là chuỗi ngắn nhất với bộ nước đi bạn đã chọn.'
-      : `${stopped ? 'Đã dừng.' : 'Đã kết thúc lượt tìm.'} Bạn có thể học chuỗi này. Vẫn có thể tồn tại chuỗi ngắn hơn.`;
+      ? `Tìm được ${count} phương án. Phương án 1 đã được chứng minh ngắn nhất.`
+      : `${stopped ? 'Đã dừng.' : 'Đã kết thúc lượt tìm.'} Tìm được ${count} phương án. Vẫn có thể tồn tại chuỗi ngắn hơn.`;
     saveSolution();
   } else {
     $('status').textContent = stopped ? 'Đã dừng' : 'Chưa có chuỗi';
@@ -213,10 +238,13 @@ function restore(entry) {
   loadCards(entry.targetCards, entry.name);
   for (const family of families) $(family).checked = entry.options[family];
   for (const [id, key] of switches) $(id).checked = entry.options[key] ?? false;
-  for (const [id, key] of [...numeric, ['deal-order', 'dealOrder'], ['triple-splits', 'tripleSplits']]) {
+  $('multi-cut-reorder').checked = entry.options.multiCutReorder ?? entry.options.triple ?? false;
+  for (const [id, key] of [...numeric, ['deal-order', 'dealOrder']]) {
     $(id).value = entry.options[key] ?? defaults[key];
   }
+  $('multi-cut-splits').value = entry.options.multiCutSplits ?? entry.options.tripleSplits ?? defaults.multiCutSplits;
   currentStep = 0;
+  currentRoute = 0;
   $('progress-block').hidden = true;
   $('status').textContent = entry.optimal ? 'Đã chứng minh' : 'Đã lưu';
   $('progress-message').textContent = entry.optimal ? 'Chuỗi ngắn nhất với bộ nước đã dùng khi lưu.' : 'Chuỗi hợp lệ đã lưu để học lại.';
@@ -268,15 +296,18 @@ $('solver-form').addEventListener('submit', event => {
       if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Giá trị cho phép từ ${min} đến ${max}.`);
       options[key] = value;
     }
-    options.tripleSplits = $('triple-splits').value;
+    options.multiCutSplits = $('multi-cut-splits').value;
     options.dealOrder = $('deal-order').value;
-    if (!families.some(family => options[family]) && !options.reverseCull) throw new Error('Bật ít nhất một loại nước đi.');
+    if (!families.some(family => options[family]) && !extraFamilies.some(([, key]) => options[key])) {
+      throw new Error('Bật ít nhất một loại nước đi.');
+    }
     const seconds = Number($('seconds').value);
     const memory = navigator.deviceMemory || 4;
     const limits = { seconds, maxStates: memory <= 2 ? 85_000 : memory <= 4 ? 180_000 : 340_000 };
     session = { key: JSON.stringify([start, target, options]), name: $('name').value.trim() || 'Stack tự nhập',
       startCards: displayCards(start), targetCards: displayCards(target), options, steps: null, optimal: false, provedThrough: 0, elapsed: 0 };
     currentStep = 0;
+    currentRoute = 0;
     renderSolution();
     $('status').textContent = 'Đang tìm';
     $('progress-message').textContent = 'Đang tìm chuỗi và kiểm tra các đường đi ngắn.';
@@ -290,8 +321,8 @@ $('solver-form').addEventListener('submit', event => {
     if (matchMedia('(max-width: 814px)').matches) $('work').scrollIntoView({ block: 'start', behavior: 'smooth' });
     worker.onmessage = ({ data }) => {
       if (data.type === 'candidate') {
-        session.steps = data.steps;
-        $('progress-message').textContent = `Đã có chuỗi ${data.steps.length} nước. Đang tìm chuỗi ngắn hơn.`;
+        receiveRoutes(data);
+        $('progress-message').textContent = `Đã có ${session.routes.length} phương án. Chuỗi ngắn nhất hiện tại có ${session.steps.length} nước.`;
         renderSolution();
         saveSolution();
       } else if (data.type === 'progress') {
@@ -299,7 +330,7 @@ $('solver-form').addEventListener('submit', event => {
         $('status').textContent = { structured: 'Dò các cụm 13 lá', exact: 'Kiểm tra chuỗi ngắn', improve: 'Đang rút gọn' }[data.phase];
       } else if (data.type === 'done') {
         setProgress(data);
-        session.steps = data.steps;
+        receiveRoutes(data);
         session.optimal = data.optimal;
         renderSolution();
         finish();
@@ -340,9 +371,15 @@ $('random').addEventListener('click', () => {
 $('stop').addEventListener('click', () => finish(true));
 $('previous').addEventListener('click', () => showStep(currentStep - 1));
 $('next').addEventListener('click', () => showStep(currentStep + 1));
+$('route').addEventListener('change', () => {
+  currentRoute = Number($('route').value);
+  currentStep = 0;
+  renderSolution();
+});
 $('copy').addEventListener('click', async () => {
   try {
-    await navigator.clipboard.writeText(session.steps.map((step, index) => `${index + 1}. ${moveName(step)}`).join('\n'));
+    const steps = session.routes?.[currentRoute] ?? session.steps;
+    await navigator.clipboard.writeText(steps.map((step, index) => `${index + 1}. ${moveName(step)}`).join('\n'));
     $('copy').textContent = 'Đã chép';
     setTimeout(() => { $('copy').textContent = 'Chép chuỗi'; }, 1300);
   } catch { $('saved-note').textContent = 'Trình duyệt chưa cho chép. Bạn vẫn có thể mở từng nước trong danh sách.'; }

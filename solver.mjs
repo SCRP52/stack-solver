@@ -11,9 +11,9 @@ const index = letter => letter.charCodeAt(0) - base;
 const suits = { '♠': 'S', '♦': 'D', '♣': 'C', '♥': 'H' };
 
 export const defaults = {
-  out: true, in: true, near: true, cut: true, triple: false, run: true, cull: true,
+  out: true, in: true, near: true, cut: true, multiCutOverhand: false, multiCutReorder: false, run: true, cull: true,
   reverse: true, deal: false, dealMax: 10, dealOrder: 'ordered', faroOffsets: true,
-  faroWindow: 8, runMax: 39, cullMax: 5, cullDeeper: true, reverseCull: true, tripleSplits: '13,26,39',
+  faroWindow: 8, runMax: 39, cullMax: 5, cullDeeper: true, reverseCull: true, multiCutSplits: '13,26,39',
 };
 
 export const mnemonica = '4C 2H 7D 3C 4H 6D AS 5H 9S 2S QH 3D QC 8H 6S 5S 9H KC 2D JH 3S 8S 6H 10C 5D KD 2C 3H 8D 5C KS JD 8C 10S KH JC 7S 10H AD 4S 7H 4D AC 9C JS QD 7C QS 10D 6C AH 9D';
@@ -113,6 +113,21 @@ function* allPileOrders(piles, used = []) {
   }
 }
 
+function* cutSplits(marks, max, chosen = [], from = 0) {
+  for (let i = from; i < marks.length; i++) {
+    const splits = [...chosen, marks[i]];
+    if (splits.length >= 2) yield splits;
+    if (splits.length < max) yield* cutSplits(marks, max, splits, i + 1);
+  }
+}
+
+function makeMultiCutMove(splits, order, overhand = false) {
+  const boundaries = [0, ...splits, size];
+  const map = order.flatMap(pile => positions.slice(boundaries[pile - 1], boundaries[pile]));
+  const label = `Multi Cut ${overhand ? 'overhand' : 'gom tự do'} · ${splits.length + 1} cọc · ${splits.join(', ')} → ${order.join('–')}`;
+  return moveFromMap('multi-cut', label, map, { splits, order, overhand });
+}
+
 function* cyclicPileOrders(count) {
   for (const direction of [1, -1]) {
     for (let start = 0; start < count; start++) {
@@ -147,13 +162,16 @@ export function makeMoves(options = defaults) {
   const runs = new Map();
   const culls = new Map();
 
-  function add(kind, label, map, params = {}, apply = state => applyMap(state, map)) {
-    const move = moveFromMap(kind, label, map, params, apply);
+  function keep(move) {
     if (!move) return null;
     const existing = unique.get(move.key);
     if (existing) return existing;
     unique.set(move.key, move);
     return move;
+  }
+
+  function add(kind, label, map, params = {}, apply = state => applyMap(state, map)) {
+    return keep(moveFromMap(kind, label, map, params, apply));
   }
 
   for (const kind of ['out', 'in']) {
@@ -199,22 +217,26 @@ export function makeMoves(options = defaults) {
       if (move.kind === 'reverse') move.undo = apply;
     }
   }
-  if (config.triple) {
-    const raw = config.tripleSplits.trim().split(/[\s,]+/);
+  let wideMultiCut = null;
+  if (config.multiCutOverhand || config.multiCutReorder) {
+    const raw = config.multiCutSplits.trim().split(/[\s,]+/);
     if (raw.some(value => !/^\d+$/.test(value) || +value < 1 || +value >= size)) {
-      throw new Error('Mốc triple cut phải là các số từ 1 đến 51.');
+      throw new Error('Mốc Multi Cut phải là các số từ 1 đến 51.');
     }
-    const splits = [...new Set(raw.map(Number))].sort((a, b) => a - b);
-    if (splits.length < 2) throw new Error('Triple cut cần ít nhất hai mốc khác nhau.');
-    for (let i = 0; i < splits.length; i++) {
-      for (const b of splits.slice(i + 1)) {
-        const a = splits[i];
-        const packets = { A: positions.slice(0, a), B: positions.slice(a, b), C: positions.slice(b) };
-        for (const order of ['CBA', 'ACB', 'BAC']) {
-          const map = Array.from(order, letter => packets[letter]).flat();
-          add('triple', `Triple cut ${a} · ${b} → ${order}`, map, { a, b, order });
-        }
+    const marks = [...new Set(raw.map(Number))].sort((a, b) => a - b);
+    if (marks.length < 2 || marks.length > 9) throw new Error('Multi Cut cần từ 2 đến 9 mốc khác nhau.');
+    if (config.multiCutOverhand) {
+      for (const splits of cutSplits(marks, marks.length)) {
+        const order = Array.from({ length: splits.length + 1 }, (_, i) => splits.length + 1 - i);
+        keep(makeMultiCutMove(splits, order, true));
       }
+    }
+    if (config.multiCutReorder) {
+      for (const splits of cutSplits(marks, 3)) {
+        const piles = Array.from({ length: splits.length + 1 }, (_, i) => i + 1);
+        for (const order of allPileOrders(piles)) keep(makeMultiCutMove(splits, order));
+      }
+      if (marks.length > 3) wideMultiCut = marks;
     }
   }
   if (config.deal) {
@@ -257,7 +279,7 @@ export function makeMoves(options = defaults) {
     }
   }
   const wideDeal = config.deal && config.dealOrder === 'any' && config.dealMax > 5;
-  return { list: [...unique.values()], unique, cuts, culls, runs, config, wideCull, wideDeal };
+  return { list: [...unique.values()], unique, cuts, culls, runs, config, wideCull, wideDeal, wideMultiCut };
 }
 
 const isCull = move => move?.kind === 'cull' || move?.kind === 'reverse-cull';
@@ -329,48 +351,66 @@ function findDirectDeal(start, target, max) {
   return null;
 }
 
-function directExpandedMove(start, target, moves) {
-  return (moves.wideCull ? findDirectCull(start, target, moves.config) : null) ??
-    (moves.wideDeal ? findDirectDeal(start, target, moves.config.dealMax) : null);
+function findDirectMultiCut(start, target, marks) {
+  // Each cọc is an intact run from the source deck. Its first position
+  // therefore tells us where the cut was made and where the cọc was placed.
+  const starts = [];
+  let previous = -2;
+  for (const card of target) {
+    const position = start.indexOf(card);
+    if (position !== previous + 1) {
+      if (position !== 0 && !marks.includes(position)) return null;
+      starts.push(position);
+    }
+    previous = position;
+  }
+  if (starts.length < 5) return null; // Smaller cuts are already in the move list.
+  const boundaries = [...starts].sort((a, b) => a - b);
+  return makeMultiCutMove(boundaries.slice(1), starts.map(position => boundaries.indexOf(position) + 1));
 }
 
-function shallowWithExpandedMoves(start, target, moves, expired) {
+function directExpandedMove(start, target, moves, allowCull = true) {
+  return (allowCull && moves.wideCull ? findDirectCull(start, target, moves.config) : null) ??
+    (moves.wideDeal ? findDirectDeal(start, target, moves.config.dealMax) : null) ??
+    (moves.wideMultiCut ? findDirectMultiCut(start, target, moves.wideMultiCut) : null);
+}
+
+function findShallowRoutes(start, target, moves, expired, offer, enough) {
   const before = new Map();
   const after = new Map();
   for (const move of moves.list) {
-    if (expired()) return { depth: 0 };
+    if (expired()) return 0;
     const state = move.apply(start);
-    if (state === target) return { depth: 0, route: [move] };
-    if (!isCull(move)) {
-      before.set(state, move);
-      after.set(move.undo(target), move);
-    }
+    if (state === target) offer([move]);
+    before.set(state, move);
+    after.set(move.undo(target), move);
   }
-  const direct = directExpandedMove(start, target, moves);
-  if (direct) return { depth: 0, route: [direct] };
+  if (moves.wideCull) offer([findDirectCull(start, target, moves.config)]);
+  if (moves.wideDeal) offer([findDirectDeal(start, target, moves.config.dealMax)]);
+  if (moves.wideMultiCut) offer([findDirectMultiCut(start, target, moves.wideMultiCut)]);
   for (const [state, first] of before) {
-    if (expired()) return { depth: 1 };
-    const last = after.get(state) ?? directExpandedMove(state, target, moves);
-    if (last) return { depth: 1, route: [first, last] };
+    if (expired() || enough(2)) return 1;
+    const last = after.get(state);
+    if (last && !sameCull(first, last)) offer([first, last]);
+    offer([first, directExpandedMove(state, target, moves, !isCull(first))]);
   }
   for (const [state, last] of after) {
-    if (expired()) return { depth: 1 };
-    const first = directExpandedMove(start, state, moves);
-    if (first) return { depth: 1, route: [first, last] };
+    if (expired() || enough(2)) return 1;
+    offer([directExpandedMove(start, state, moves, !isCull(last)), last]);
   }
-  if (moves.wideDeal) {
-    for (const cull of moves.list.filter(isCull)) {
-      if (expired()) return { depth: 1 };
-      const last = findDirectDeal(cull.apply(start), target, moves.config.dealMax);
-      if (last) return { depth: 1, route: [cull, last] };
-      const first = findDirectDeal(start, cull.undo(target), moves.config.dealMax);
-      if (first) return { depth: 1, route: [first, cull] };
+  // Only cull + cull is disallowed. Other pairs of dynamically generated
+  // moves still need a search before we can rule out two-move solutions.
+  const proved = moves.wideDeal || moves.wideMultiCut ? 1 : 2;
+  const threeMoveDeadline = performance.now() + 350;
+  for (const [state, first] of before) {
+    for (const middle of moves.list) {
+      if (expired() || enough(3) || performance.now() >= threeMoveDeadline) return proved;
+      if (sameCull(first, middle)) continue;
+      const last = after.get(middle.apply(state));
+      if (last && !sameCull(middle, last)) offer([first, middle, last]);
     }
-    // Pairs consisting entirely of dynamically generated moves have not
-    // been exhausted, so only report the complete one-move check.
-    return { depth: 1 };
   }
-  return { depth: 2 };
+  return proved;
 }
 
 function cutAndAppend(route, move, moves) {
@@ -522,7 +562,7 @@ function readRoute(left, right) {
 function findStructured(start, target, moves, expired) {
   const blockMoves = moves.list.filter(move => {
     const p = move.params;
-    if (move.kind === 'triple') return p.a % 13 === 0 && p.b % 13 === 0;
+    if (move.kind === 'multi-cut') return p.splits.every(split => split % 13 === 0);
     return ['cut', 'run', 'reverse'].includes(move.kind) && p.n % 13 === 0;
   });
   const faros = moves.list.filter(move => move.kind === 'faro' && move.params.split === 26);
@@ -551,8 +591,7 @@ function findStructured(start, target, moves, expired) {
   function join(state, route, reverse) {
     let tail = suffixes.get(state);
     if (!tail && (!best || route.length + (reverse ? 2 : 1) < best.length)) {
-      const last = reverse && !moves.wideCull ? null : reverse ? findDirectCull(state, target, moves.config)
-        : directExpandedMove(state, target, moves);
+      const last = directExpandedMove(state, target, moves);
       if (last) tail = [last];
     }
     if (!tail) return;
@@ -589,7 +628,7 @@ function findStructured(start, target, moves, expired) {
   return best;
 }
 
-function findExact(start, target, moves, limits, report, clock, getBest) {
+function findExact(start, target, moves, limits, report, clock, getBest, offer, enough) {
   const root = state => ({ state, parent: null, move: null });
   const side = (state, backward) => {
     const node = root(state);
@@ -605,14 +644,15 @@ function findExact(start, target, moves, limits, report, clock, getBest) {
     const [current, other] = left.frontier.length <= right.frontier.length ? [left, right] : [right, left];
     const nextLayer = [];
     let capped = false;
+    let foundLength = 0;
     for (const node of current.frontier) {
-      if (clock.expired()) return { depth, checked, timedOut: true };
+      if (clock.expired()) return { depth: Math.max(depth, foundLength - 1), checked, timedOut: true };
       const previousCull = isCull(node.move);
       for (const move of moves.list) {
         if (previousCull && isCull(move)) continue;
         if ((++checked & 2047) === 0) {
           report('exact', depth, checked);
-          if (clock.expired()) return { depth, checked, timedOut: true };
+          if (clock.expired()) return { depth: Math.max(depth, foundLength - 1), checked, timedOut: true };
         }
         const state = current.backward ? move.undo(node.state) : move.apply(node.state);
         const flag = isCull(move) ? 1 : 0;
@@ -621,9 +661,11 @@ function findExact(start, target, moves, limits, report, clock, getBest) {
         if (partner) {
           const join = { state, parent: node, move };
           const route = current.backward ? readRoute(partner, join) : readRoute(join, partner);
-          return { depth: route.length - 1, checked, route };
+          foundLength ||= route.length;
+          offer(route, true);
+          if (enough(foundLength)) return { depth: foundLength - 1, checked };
         }
-        if (capped) continue;
+        if (capped || foundLength) continue;
         const entry = current.seen.get(state);
         if (!entry?.[flag]) {
           if (saved >= limits.maxStates) { capped = true; continue; }
@@ -635,6 +677,7 @@ function findExact(start, target, moves, limits, report, clock, getBest) {
         }
       }
     }
+    if (foundLength) return { depth: foundLength - 1, checked };
     depth++;
     report('exact', depth, checked, true);
     if (capped) return { depth, checked };
@@ -679,19 +722,35 @@ function shorten(route, moves, clock) {
   return route;
 }
 
+function shuffle(items) {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
+
 function varyMove(state, target, moves, listed) {
-  if (moves.wideDeal && Math.random() < 0.2) {
+  const draw = Math.random();
+  if (moves.wideMultiCut && draw < 0.2) {
+    const marks = moves.wideMultiCut;
+    const count = 4 + Math.floor(Math.random() * (marks.length - 3));
+    const splits = shuffle([...marks]).slice(0, count).sort((a, b) => a - b);
+    const starts = [0, ...splits];
+    const order = starts.map((_, i) => i + 1);
+    if (Math.random() < 0.5) {
+      const firstPosition = pile => target.indexOf(state[starts[pile - 1]]);
+      order.sort((a, b) => firstPosition(a) - firstPosition(b));
+    } else shuffle(order);
+    return makeMultiCutMove(splits, order) ?? listed[Math.floor(Math.random() * listed.length)];
+  }
+  if (moves.wideDeal && draw >= 0.8) {
     const count = 6 + Math.floor(Math.random() * (moves.config.dealMax - 5));
     const order = Array.from({ length: count }, (_, i) => i + 1);
     if (Math.random() < 0.5) {
       const firstPosition = pile => target.indexOf(state[pileSlots[count][pile - 1][0]]);
       order.sort((a, b) => firstPosition(a) - firstPosition(b));
-    } else {
-      for (let i = order.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [order[i], order[j]] = [order[j], order[i]];
-      }
-    }
+    } else shuffle(order);
     return makeDealMove(count, order);
   }
   return listed[Math.floor(Math.random() * listed.length)];
@@ -699,7 +758,7 @@ function varyMove(state, target, moves, listed) {
 
 export function solve(start, target, options, limits, notify = () => {}) {
   const moves = makeMoves(options);
-  const expanded = moves.wideCull || moves.wideDeal;
+  const expanded = moves.wideCull || moves.wideDeal || moves.wideMultiCut;
   const started = performance.now();
   const clock = { expired: () => performance.now() - started >= limits.seconds * 1000 };
   let previousReport = -Infinity;
@@ -707,6 +766,10 @@ export function solve(start, target, options, limits, notify = () => {}) {
   let provedThrough = start === target ? -1 : 0;
   let attempts = 0;
   let checked = 0;
+  let lastCandidate = -Infinity;
+  const choices = [];
+  const maxChoices = 5;
+  const enough = maxLength => choices.length === maxChoices && choices.at(-1).route.length <= maxLength;
 
   function report(phase, depth, count, force = false) {
     const elapsed = performance.now() - started;
@@ -716,68 +779,98 @@ export function solve(start, target, options, limits, notify = () => {}) {
       seconds: elapsed / 1000, moveCount: moves.list.length, bestLength: best?.length ?? null });
   }
 
-  function offer(route, announce = true) {
-    if (!route || (best && route.length >= best.length)) return;
-    if (replay(start, route).final !== target) throw new Error('Chuỗi tìm được chưa về đúng stack đích.');
-    best = route;
-    if (announce) notify({ type: 'candidate', steps: replay(start, best).steps });
+  function publishCandidate(force = false) {
+    const now = performance.now();
+    if (!best || (!force && now - lastCandidate < 175)) return;
+    lastCandidate = now;
+    notify({ type: 'candidate', steps: choices[0].steps, routes: choices.map(choice => choice.steps) });
+  }
+
+  function offer(route, announce = false) {
+    if (!route || route.some(move => !move) || enough(route.length)) return;
+    const key = route.map(move => move.key).join('');
+    if (choices.some(choice => choice.key === key)) return;
+    for (let i = 1; i < route.length; i++) {
+      if (route[i - 1].kind !== 'cut' || route[i].kind !== 'cut') continue;
+      if ((route[i - 1].params.n + route[i].params.n) % size || !sameCull(route[i - 2], route[i + 1])) return;
+    }
+    const { final, steps } = replay(start, route);
+    if (final !== target) throw new Error('Chuỗi tìm được chưa về đúng stack đích.');
+    const seen = new Map([[displayCards(start).join(','), 0]]);
+    for (let i = 0; i < steps.length; i++) {
+      const deck = steps[i].deck.join(',');
+      if (seen.has(deck) && !sameCull(route[seen.get(deck) - 1], route[i + 1])) return;
+      seen.set(deck, i + 1);
+    }
+    choices.push({ key, route, steps });
+    choices.sort((a, b) => a.route.length - b.route.length);
+    if (choices.length > maxChoices) choices.pop();
+    best = choices[0].route;
+    provedThrough = Math.min(provedThrough, best.length - 1);
+    if (announce) publishCandidate();
   }
 
   if (start === target) offer([]);
-  else if (expanded) {
-    const shallow = shallowWithExpandedMoves(start, target, moves, clock.expired);
-    provedThrough = shallow.depth;
-    if (shallow.route) offer(shallow.route);
+  else {
+    const shallowDepth = findShallowRoutes(start, target, moves, clock.expired, offer, enough);
+    provedThrough = best ? Math.min(shallowDepth, best.length - 1) : shallowDepth;
+    publishCandidate(true);
   }
-  if (start !== target && !best && !clock.expired()) {
-    report('structured', provedThrough, checked, true);
-    // Keep this preliminary search brief on slower devices so enough time
-    // remains for the general search and the fallback builder.
-    const structuredUntil = started + Math.min(8, limits.seconds * 0.6) * 1000;
-    offer(findStructured(start, target, moves, () => clock.expired() || performance.now() >= structuredUntil), false);
-    for (let rotation = 0; rotation < size; rotation++) {
-      offer(buildWithCulls(start, target, moves, rotation), false);
-      offer(buildWithInsertedCulls(start, target, moves, rotation), false);
+  if (start !== target && !clock.expired()) {
+    if (!best || best.length > provedThrough + 1 || choices.length < maxChoices) {
+      report('structured', provedThrough, checked, true);
+      const structuredUntil = started + Math.min(8, limits.seconds * 0.6) * 1000;
+      offer(findStructured(start, target, moves, () => clock.expired() || performance.now() >= structuredUntil));
+      for (let rotation = 0; rotation < size && !clock.expired(); rotation++) {
+        offer(buildWithCulls(start, target, moves, rotation));
+        offer(buildWithInsertedCulls(start, target, moves, rotation));
+      }
+      offer(buildWithRuns(start, target, moves));
+      publishCandidate(true);
     }
-    offer(buildWithRuns(start, target, moves), false);
-    if (best) notify({ type: 'candidate', steps: replay(start, best).steps });
+    let exact;
     if (!best || provedThrough < best.length - 1) {
       const onProof = (phase, depth, count, force) => report(phase, expanded ? provedThrough : depth, count, force);
-      const exact = findExact(start, target, moves, limits, onProof, clock, () => best);
+      exact = findExact(start, target, moves, limits, onProof, clock, () => best, offer, enough);
       checked = exact.checked;
-      if (!expanded) provedThrough = exact.depth;
-      if (exact.route) offer(exact.route);
+      if (!expanded) provedThrough = Math.max(provedThrough, exact.depth);
+    }
 
-      if ((!exact.exhausted || expanded) && !clock.expired() && (!best || provedThrough < best.length - 1)) {
-        report('improve', provedThrough, checked, true);
-        if (best) offer(shorten(best, moves, clock));
-        const varied = moves.list.filter(move => !isCull(move));
-        while (varied.length && !clock.expired() && (!best || provedThrough < best.length - 1)) {
-          let state = start;
-          const prefix = [];
-          const length = 1 + (attempts % 7);
-          for (let i = 0; i < length; i++) {
-            const move = varyMove(state, target, moves, varied);
-            prefix.push(move);
-            state = move.apply(state);
-          }
-          const rotation = Math.floor(Math.random() * size);
-          const chooseCullTail = (attempts % 2 ? buildWithCulls : buildWithInsertedCulls);
-          const last = directExpandedMove(state, target, moves);
-          const tail = state === target ? [] : last ? [last] : chooseCullTail(state, target, moves, rotation) ??
-            buildWithCulls(state, target, moves, rotation) ?? buildWithRuns(state, target, moves);
-          if (tail && (!best || prefix.length + tail.length <= best.length + 5)) {
-            offer(shorten(prefix.concat(tail), moves, clock));
-          }
-          attempts++;
-          report('improve', provedThrough, checked);
+    const varied = moves.list.filter(move => !isCull(move));
+    const canVary = varied.some(move => move.kind !== 'cut') || expanded;
+    const extraUntil = performance.now() + 1500;
+    while (canVary && varied.length && !clock.expired() && (!exact?.exhausted || expanded) &&
+      (!best || provedThrough < best.length - 1 || (choices.length < maxChoices && performance.now() < extraUntil))) {
+      report('improve', provedThrough, checked);
+      if (!attempts && best) offer(shorten(best, moves, clock), true);
+      let state = start;
+      const prefix = [];
+      const length = 1 + (attempts % 7);
+      for (let i = 0; i < length; i++) {
+        const move = varyMove(state, target, moves, varied);
+        prefix.push(move);
+        state = move.apply(state);
+      }
+      const rotation = Math.floor(Math.random() * size);
+      const chooseCullTail = attempts % 2 ? buildWithCulls : buildWithInsertedCulls;
+      let permutation = '';
+      for (const card of target) permutation += ids[state.indexOf(card)];
+      const finishing = moves.unique.get(permutation) ?? directExpandedMove(state, target, moves);
+      const tail = state === target ? [] : finishing ? [finishing] : chooseCullTail(state, target, moves, rotation) ??
+        buildWithCulls(state, target, moves, rotation) ?? buildWithRuns(state, target, moves);
+      if (tail) {
+        const route = prefix.concat(tail);
+        if (!enough(route.length + 5)) {
+          offer(shorten(route, moves, clock), true);
+          offer(route, true);
         }
       }
+      attempts++;
     }
   }
   const optimal = best !== null && provedThrough >= best.length - 1;
   return { type: 'done', optimal, provedThrough, checked, attempts, seconds: (performance.now() - started) / 1000,
-    steps: best ? replay(start, best).steps : null };
+    steps: choices[0]?.steps ?? null, routes: choices.map(choice => choice.steps) };
 }
 
 export function demoStack() {

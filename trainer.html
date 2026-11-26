@@ -106,9 +106,9 @@
                 <label for="practice-focus" data-en="Review focus">Ôn tập</label>
                 <select id="practice-focus"><option value="all" data-en="All cards">Tất cả lá</option><option value="weak" data-en="Frequently missed">Lá hay sai</option><option value="slow" data-en="Slow answers">Lá trả lời chậm</option></select>
               </div>
-              <div id="answer-mode-field">
+              <div>
                 <label for="answer-mode" data-en="Answer mode">Cách trả lời</label>
-                <select id="answer-mode"><option value="typed" data-en="Enter answer">Nhập đáp án</option><option value="self" data-en="Flashcard · self-grade">Flashcard · tự chấm</option></select>
+                <select id="answer-mode"><option value="choice" data-en="Choose A/B/C">Chọn A/B/C</option><option value="manual" selected data-en="On-screen input">Nhập trên màn hình</option></select>
               </div>
             </div>
             <p id="advanced-range" class="hint" hidden data-en="Advanced uses the full 52-card stack.">Advanced dùng cả stack 52 lá.</p>
@@ -126,21 +126,19 @@
           <progress id="trial-progress" aria-label="Tiến độ lượt thi" data-en-aria="Trial progress" hidden></progress>
           <p id="trial-size-note" class="hint" hidden></p>
           <p id="question-skill" class="muted"></p>
-          <h2 id="question-text"></h2>
+          <h2 id="question-text" tabindex="-1"></h2>
           <div id="question-cards" class="prompt-cards" hidden></div>
           <form id="answer-form">
-            <div id="answer-fields" class="answer-fields"></div>
+            <div id="answer-choices" class="answer-choices"></div>
+            <div id="answer-pad" class="answer-pad">
+              <div id="answer-slots" class="answer-slots"></div>
+              <div id="answer-keys"></div>
+            </div>
             <div class="actions session-actions">
-              <button class="primary" data-en="Submit">Trả lời</button>
+              <button class="primary" id="submit-answer" data-en="Submit">Trả lời</button>
               <button type="button" class="secondary" id="skip-answer" data-en="Skip">Bỏ qua</button>
             </div>
           </form>
-          <button type="button" class="primary session-actions" id="reveal-answer" hidden data-en="Reveal answer">Lật đáp án</button>
-          <p class="error" role="status" id="answer-error" hidden></p>
-          <div id="self-grade" class="actions session-actions" hidden>
-            <button type="button" class="secondary" id="mark-wrong" data-en="I missed it">Mình trả lời sai</button>
-            <button type="button" class="primary" id="mark-right" data-en="I got it">Mình trả lời đúng</button>
-          </div>
           <div id="feedback" role="status" hidden></div>
           <button type="button" class="primary session-actions" id="next-question" hidden data-en="Next question">Câu tiếp theo</button>
         </div>

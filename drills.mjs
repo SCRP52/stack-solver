@@ -173,3 +173,53 @@ export function grade(prompt, raw) {
   if (prompt.unordered) return new Set(values).size === values.length && values.every(value => prompt.answer.includes(value));
   return values.every((value, index) => value === prompt.answer[index]);
 }
+
+export function answerChoices(prompt, cards, { start = 1, end = size } = {}, random = Math.random) {
+  const { kind, answer, shown, unordered } = prompt;
+  const numeric = typeof answer[0] === 'number';
+  const normalize = values => unordered ? [...values].sort(numeric ? (a, b) => a - b : undefined) : values;
+  const correct = normalize(answer);
+  const keyFor = values => values.join(' ');
+  const candidates = new Map();
+  const correctKey = keyFor(correct);
+  const add = values => {
+    const normalized = normalize(values);
+    const key = keyFor(normalized);
+    if (key !== correctKey) candidates.set(key, normalized);
+  };
+  if (kind === 'quartet-order') {
+    for (let left = 0; left < answer.length; left++) {
+      for (let right = left + 1; right < answer.length; right++) {
+        const changed = [...answer];
+        [changed[left], changed[right]] = [changed[right], changed[left]];
+        add(changed);
+      }
+    }
+  } else {
+    for (let i = 0; i < answer.length; i++) {
+      let alternatives;
+      if (numeric) {
+        const min = kind === 'cut-count' ? 0 : kind === 'relative-quartet' ? 2 : 1;
+        const max = kind === 'quartet-distances' ? size - 1 - answer.reduce((sum, value, j) => sum + (i === j ? 0 : value), 0)
+          : ['cut-count', 'forward-distance', 'backward-distance'].includes(kind) ? size - 1 : size;
+        alternatives = kind === 'card-position' && end - start >= 2 ? positions.slice(start - 1, end)
+          : Array.from({ length: max - min + 1 }, (_, index) => min + index);
+      } else {
+        alternatives = basic.includes(kind) && end - start >= 2 ? cards.slice(start - 1, end) : cards;
+        if (kind === 'next-rank' || kind === 'previous-rank') {
+          alternatives = alternatives.filter(value => rank(value) === rank(answer[0]) && cardLabel(value) !== prompt.args[0]);
+        } else if ((kind === 'next' || kind === 'previous') && alternatives.length > 3) {
+          alternatives = alternatives.filter(value => cardLabel(value) !== prompt.args[0]);
+        }
+      }
+      for (const alternative of alternatives) {
+        const needsDistinct = unordered || !numeric;
+        if ((needsDistinct && answer.includes(alternative)) || shown.includes(alternative)) continue;
+        const changed = [...answer];
+        changed[i] = alternative;
+        add(changed);
+      }
+    }
+  }
+  return shuffle([correct, ...shuffle([...candidates.values()], random).slice(0, 2)], random);
+}

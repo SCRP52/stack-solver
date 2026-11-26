@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { presets } from '../presets.mjs';
-import { advanced, basic, buildQuestion, grade, questionSet, stackModel } from '../drills.mjs';
+import { advanced, answerChoices, basic, buildQuestion, grade, questionSet, stackModel } from '../drills.mjs';
 import { library, saveStack, stackOrder } from '../stack-library.mjs';
 import { readProgress, saveProgress, slowCards, summarize, weakCards } from '../trainer-progress.mjs';
 import { drillCopy } from '../trainer-copy.mjs';
@@ -121,6 +121,22 @@ test('Missing Card accepts either order and requires the full set of distinct an
   assert.equal(grade(q, q.answer.slice().reverse()), true);
   assert.equal(grade(q, [q.answer[0], q.answer[0]]), false);
   assert.equal(grade(q, [q.answer[0]]), null);
+});
+
+test('A/B/C offers three distinct options with exactly one correct answer', () => {
+  const cards = presets[4].cards;
+  const model = stackModel(cards);
+  const skills = [...basic, ...Object.values(advanced).flat()];
+  const pool = questionSet(model, skills, { sequential: true });
+  for (const q of pool) {
+    const options = answerChoices(q, cards, {}, () => 0.65);
+    assert.equal(options.length, 3, q.kind);
+    assert.equal(new Set(options.map(option => option.join(' '))).size, 3, q.kind);
+    assert.equal(options.filter(option => grade(q, option.map(String)) === true).length, 1, q.kind);
+    assert.ok(options.every(option => option.every(value => !q.shown.includes(value))), q.kind);
+  }
+  const position = buildQuestion(model, 'card-position', 2);
+  assert.deepEqual(answerChoices(position, cards, { start: 2, end: 4 }).flat().sort(), [2, 3, 4]);
 });
 
 test('practice progress is isolated by exact stack order and by drill', () => {

@@ -1,6 +1,7 @@
-import { cardLabel, languageKey, library, libraryKey, readLocal, redCard, saveStack, stackOrder } from './stack-library.mjs';
+import { cardLabel, languageKey, library, libraryKey, readLocal, redCard, saveStack, stackOrder, suits } from './stack-library.mjs';
 import { message } from './i18n.mjs';
-import { advanced, basic, grade, questionSet, stackModel } from './drills.mjs';
+import { ranks } from './solver.mjs';
+import { advanced, answerChoices, basic, grade, questionSet, stackModel } from './drills.mjs';
 import { drillCopy, groupCopy } from './trainer-copy.mjs';
 import { activeStackKey, readProgress, saveProgress, slowCards, summarize, weakCards } from './trainer-progress.mjs';
 
@@ -22,6 +23,7 @@ const t = (vi, en) => lang === 'vi' ? vi : en;
 const drillName = kind => t(...drillCopy[kind]);
 const promptText = ({ kind, args }) => t(...drillCopy[kind].slice(2)).replace(/\{(\d+)\}/g, (_, index) => args[index]);
 const formatAnswer = ({ answer }) => answer.map(item => typeof item === 'number' ? item : cardLabel(item)).join(' · ');
+const suitKeys = [['S', 'Bích', 'Spades'], ['H', 'Cơ', 'Hearts'], ['C', 'Chuồn', 'Clubs'], ['D', 'Rô', 'Diamonds']];
 
 let entries = [];
 let selectedStack;
@@ -180,7 +182,6 @@ function renderSetup() {
   $('trial-count-field').hidden = !trial;
   $('order-field').hidden = trial;
   $('focus-field').hidden = trial;
-  $('answer-mode-field').hidden = trial;
   if (!beyond) {
     const count = currentSkills().reduce((sum, kind) => sum + (progress?.[kind]?.total ?? 0), 0);
     $('practice-status').textContent = count ? t(`Đã trả lời ${count} câu ở các bài đã chọn.`, `${count} answers recorded for the selected drills.`) : '';
@@ -229,7 +230,7 @@ function newRound(event) {
   }
   const requested = trial ? Number($('trial-count').value) : questions.length;
   const limit = Math.min(requested, questions.length);
-  run = { trial, questions, limit, index: 0, results: [], self: !trial && $('answer-mode').value === 'self',
+  run = { trial, questions, limit, index: 0, results: [], choice: $('answer-mode').value === 'choice', range: options,
     started: performance.now(), count: 0 };
   $('trial-size-note').hidden = limit === requested;
   $('trial-size-note').textContent = t(`Bài đã chọn có ${limit} câu khác nhau. Lượt thi dùng toàn bộ số câu này.`,
@@ -239,10 +240,133 @@ function newRound(event) {
   if (trial) { tick(); timer = setInterval(tick, 200); }
 }
 
+function answerButton(text, className, action, label) {
+  const button = element('button', text, `secondary ${className}`);
+  button.type = 'button';
+  if (label) button.setAttribute('aria-label', label);
+  button.addEventListener('click', action);
+  return button;
+}
+
+function submitAnswer(values) {
+  if (!run || run.answered) return;
+  const prompt = run.questions[run.index];
+  const raw = values.map(value => typeof value === 'number' ? String(value) : value);
+  const correct = grade(prompt, raw);
+  if (correct === null) return;
+  const numeric = typeof prompt.answer[0] === 'number';
+  record(correct, values.map(value => numeric ? String(value) : cardLabel(value)));
+}
+
+function renderChoices(prompt) {
+  const choices = answerChoices(prompt, model.cards, run.range);
+  $('answer-choices').replaceChildren(...choices.map((option, i) => {
+    const letter = 'ABC'[i];
+    const button = answerButton(undefined, 'answer-choice', () => submitAnswer(option));
+    const value = typeof option[0] === 'number'
+      ? element('span', formatAnswer({ answer: option }))
+      : element('span', undefined, 'answer-choice-cards');
+    if (typeof option[0] !== 'number') value.append(...option.map(cardFace));
+    button.append(element('strong', letter), value);
+    return button;
+  }));
+}
+
+function manualValues({ numeric, entries }) {
+  return numeric ? entries : entries.map(({ rank, suit }) => rank && suit ? rank + suit : '');
+}
+
+function setupManual(prompt) {
+  const numeric = typeof prompt.answer[0] === 'number';
+  const entries = prompt.answer.map(() => numeric ? '' : { rank: '', suit: '' });
+  const manual = { numeric, entries, active: 0 };
+  run.manual = manual;
+  const slots = entries.map((_, i) => answerButton(undefined, 'answer-slot', () => {
+    manual.active = i;
+    refresh();
+  }));
+  const next = answerButton('→', 'answer-key', () => {
+    manual.active++;
+    refresh();
+  }, t('Ô tiếp theo', 'Next entry'));
+  const remove = answerButton('⌫', 'answer-key', () => {
+    const entry = entries[manual.active];
+    if (numeric) entries[manual.active] = entry.slice(0, -1);
+    else if (entry.suit) entry.suit = '';
+    else entry.rank = '';
+    refresh();
+  }, t('Xóa ký tự', 'Delete character'));
+  const rankButtons = [];
+  const suitButtons = [];
+
+  function refresh() {
+    const entry = entries[manual.active];
+    slots.forEach((button, i) => {
+      const value = numeric ? entries[i] : entries[i].rank + (suits[entries[i].suit] ?? '');
+      button.textContent = value || '—';
+      const label = !numeric || prompt.unordered ? t(`Ô ${i + 1}`, `Entry ${i + 1}`) : t(`Chặng ${i + 1}`, `Gap ${i + 1}`);
+      button.setAttribute('aria-label', `${entries.length === 1 ? t('Đáp án', 'Answer') : label} · ${button.textContent}`);
+      button.setAttribute('aria-pressed', i === manual.active);
+      button.classList.toggle('answer-red', !numeric && redCard(entries[i].suit));
+    });
+    for (const [value, button] of rankButtons) button.setAttribute('aria-pressed', entry.rank === value);
+    for (const [value, button] of suitButtons) button.setAttribute('aria-pressed', entry.suit === value);
+    $('submit-answer').disabled = manualValues(manual).some(value => !value);
+    next.disabled = manual.active === entries.length - 1;
+    remove.disabled = numeric ? !entry : !(entry.rank || entry.suit);
+  }
+
+  function setPart(part, value) {
+    const entry = entries[manual.active];
+    const wasComplete = entry.rank && entry.suit;
+    entry[part] = value;
+    if (!wasComplete && entry.rank && entry.suit) {
+      const empty = entries.findIndex((item, i) => i > manual.active && !(item.rank && item.suit));
+      if (empty !== -1) manual.active = empty;
+    }
+    refresh();
+  }
+
+  const keys = $('answer-keys');
+  if (numeric) {
+    const digits = element('div', undefined, 'number-keys');
+    for (const value of '1234567890') {
+      const button = answerButton(value, 'answer-key', () => {
+        const previous = entries[manual.active];
+        if (previous.length < 2) entries[manual.active] = previous + value;
+        refresh();
+      });
+      if (value === '0') digits.append(remove);
+      digits.append(button);
+    }
+    digits.append(next);
+    keys.replaceChildren(digits);
+  } else {
+    const rankRow = element('div', undefined, 'rank-keys');
+    for (const rank of ranks) {
+      const button = answerButton(rank, 'answer-key', () => setPart('rank', rank));
+      rankButtons.push([rank, button]);
+      rankRow.append(button);
+    }
+    const suitRow = element('div', undefined, 'suit-keys');
+    for (const [suit, vi, en] of suitKeys) {
+      const style = redCard(suit) ? 'answer-key answer-red' : 'answer-key';
+      const button = answerButton(suits[suit], style, () => setPart('suit', suit), t(vi, en));
+      suitButtons.push([suit, button]);
+      suitRow.append(button);
+    }
+    const tools = element('div', undefined, 'answer-pad-tools');
+    tools.append(remove);
+    if (entries.length > 1) tools.append(next);
+    keys.replaceChildren(rankRow, suitRow, tools);
+  }
+  $('answer-slots').replaceChildren(...slots);
+  refresh();
+}
+
 function showQuestion() {
   const prompt = run.questions[run.index];
   run.answered = false;
-  run.revealMs = null;
   $('session-mode').textContent = run.trial ? t('Thi', 'Time Trial') : t('Tập', 'Trainer');
   $('question-count').textContent = run.trial ? `${run.count + 1} / ${run.limit}` : t(`Câu ${run.count + 1}`, `Question ${run.count + 1}`);
   $('trial-time').hidden = !run.trial;
@@ -252,37 +376,20 @@ function showQuestion() {
   $('question-text').textContent = promptText(prompt);
   $('question-cards').replaceChildren(...prompt.shown.map(cardFace));
   $('question-cards').hidden = !prompt.shown.length;
-  $('answer-form').hidden = run.self;
-  $('reveal-answer').hidden = !run.self;
-  $('self-grade').hidden = true;
+  $('answer-form').hidden = false;
+  $('answer-choices').hidden = !run.choice;
+  $('answer-pad').hidden = run.choice;
+  $('submit-answer').hidden = run.choice;
   $('next-question').hidden = true;
   $('feedback').hidden = true;
-  $('answer-error').hidden = true;
-  if (!run.self) {
-    const numeric = typeof prompt.answer[0] === 'number';
-    const labels = numeric && prompt.answer.length > 1
-      ? prompt.answer.map((_, i) => prompt.unordered ? t(`Ô ${i + 1}`, `Entry ${i + 1}`) : t(`Chặng ${i + 1}`, `Gap ${i + 1}`))
-      : [t('Đáp án', 'Answer')];
-    $('answer-fields').replaceChildren(...labels.map((heading, i) => {
-      const field = element('div');
-      const label = element('label', heading);
-      const input = element('input');
-      input.id = label.htmlFor = `answer-${i}`;
-      input.inputMode = numeric ? 'numeric' : 'text';
-      input.autocapitalize = 'characters';
-      input.spellcheck = false;
-      input.autocomplete = 'off';
-      field.append(label, input);
-      return field;
-    }));
-  }
+  if (run.choice) renderChoices(prompt);
+  else setupManual(prompt);
   run.questionStarted = performance.now();
-  if (run.self) $('reveal-answer').focus();
-  else $('answer-0').focus();
+  $('question-text').focus({ preventScroll: true });
 }
 
-function feedback(prompt, right = null, skipped = false) {
-  const title = skipped ? t('Đã bỏ qua', 'Skipped') : right === null ? t('Đáp án', 'Answer') : right ? t('Đúng', 'Correct') : t('Sai', 'Incorrect');
+function feedback(prompt, right, skipped) {
+  const title = skipped ? t('Đã bỏ qua', 'Skipped') : right ? t('Đúng', 'Correct') : t('Sai', 'Incorrect');
   $('feedback').dataset.result = right === false ? 'wrong' : 'answer';
   $('feedback').textContent = `${title} · ${formatAnswer(prompt)}`;
   $('feedback').hidden = false;
@@ -293,7 +400,7 @@ function record(correct, values = [], skipped = false) {
   const prompt = run.questions[run.index];
   run.answered = true;
   run.count++;
-  const result = { prompt, correct, values, skipped, ms: run.revealMs ?? (performance.now() - run.questionStarted) };
+  const result = { prompt, correct, values, skipped, ms: performance.now() - run.questionStarted };
   try { progress = saveProgress(order, prompt, result); } catch { storageError(); }
   if (run.trial) {
     run.results.push(result);
@@ -307,8 +414,6 @@ function record(correct, values = [], skipped = false) {
     return;
   }
   $('answer-form').hidden = true;
-  $('self-grade').hidden = true;
-  $('answer-error').hidden = true;
   feedback(prompt, correct, skipped);
   $('next-question').textContent = run.count === run.limit ? t('Kết thúc lượt', 'Finish session') : t('Câu tiếp theo', 'Next question');
   $('next-question').hidden = false;
@@ -413,23 +518,9 @@ for (const id of ['skill', 'practice-focus']) $(id).addEventListener('change', r
 $('practice-form').addEventListener('submit', newRound);
 $('answer-form').addEventListener('submit', event => {
   event.preventDefault();
-  const answers = all('#answer-fields input').map(input => input.value);
-  const correct = grade(run.questions[run.index], answers);
-  if (correct === null) {
-    $('answer-error').hidden = false;
-    $('answer-error').textContent = t('Điền đủ đáp án. Dùng số hoặc mã lá như AS, 10H tùy câu.', 'Enter the full answer. Use numbers or card codes such as AS and 10H as requested.');
-  } else record(correct, answers);
+  if (run && !run.choice) submitAnswer(manualValues(run.manual));
 });
 $('skip-answer').addEventListener('click', () => record(false, [], true));
-$('reveal-answer').addEventListener('click', () => {
-  run.revealMs = performance.now() - run.questionStarted;
-  feedback(run.questions[run.index]);
-  $('reveal-answer').hidden = true;
-  $('self-grade').hidden = false;
-  $('mark-right').focus();
-});
-$('mark-right').addEventListener('click', () => record(true));
-$('mark-wrong').addEventListener('click', () => record(false));
 $('next-question').addEventListener('click', advanceQuestion);
 $('quit-practice').addEventListener('click', exitRound);
 $('back-to-practice').addEventListener('click', exitRound);

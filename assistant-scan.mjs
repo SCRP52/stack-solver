@@ -1,4 +1,4 @@
-import { createStableCardGate, meanPixelDifference } from './assistant-scan-logic.mjs';
+import { agreeOnCard, createStableCardGate, meanPixelDifference } from './assistant-scan-logic.mjs?v=39';
 
 const $ = id => document.getElementById(id);
 const rankCrop = document.createElement('canvas');
@@ -23,9 +23,10 @@ let wakeLock;
 let frameTimer;
 let originalThemeColor;
 const stableCardGate = createStableCardGate();
-let lastScanAt = 0;
+const scanIntervalMs = 55;
+let lastVideoTime = -1;
 let scanning = false;
-let previousScanPixels;
+const previousScanPixels = new Map();
 
 function isEnglish() { try { return localStorage.getItem('stack-converter-language') === 'en'; } catch { return false; } }
 function text(vi, en) { return isEnglish() ? en : vi; }
@@ -265,20 +266,30 @@ function identifyRank(canvas) {
   return matches && matches[0].score >= .4 && matches[0].score - matches[1].score >= .035 ? matches[0] : null;
 }
 
-function prepareCardCrops(frameWidth, frameHeight) {
+function drawCornerCrop(frame, canvas, x, y, width, height, mirrored) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!mirrored) {
+    ctx.drawImage(frame, x, y, width, height, 0, 0, canvas.width, canvas.height);
+    return;
+  }
+  ctx.save();
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(frame, frame.width - x - width, y, width, height, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function prepareCardCrops(frame, mirrored) {
+  const { width: frameWidth, height: frameHeight } = frame;
   const side = Math.min(frameWidth * .48, frameHeight * .54);
   const x = Math.round((frameWidth - side) / 2);
   const y = Math.round((frameHeight - side * 1.34) / 2);
   const w = Math.round(side);
   const h = Math.min(Math.round(side * 1.34), frameHeight - y);
-  if (h < 80) return null;
-  const rankCtx = rankCrop.getContext('2d', { willReadFrequently: true });
-  const suitCtx = suitCrop.getContext('2d', { willReadFrequently: true });
-  rankCtx.fillStyle = '#fff'; rankCtx.fillRect(0, 0, rankCrop.width, rankCrop.height);
-  rankCtx.drawImage(capture, x, y, w * .74, h * .48, 0, 0, rankCrop.width, rankCrop.height);
-  suitCtx.fillStyle = '#fff'; suitCtx.fillRect(0, 0, suitCrop.width, suitCrop.height);
-  suitCtx.drawImage(capture, x, y + h * .5, w * .74, h * .48, 0, 0, suitCrop.width, suitCrop.height);
-  return { rankCtx, suitCtx };
+  if (h < 80) return false;
+  drawCornerCrop(frame, rankCrop, x, y, w * .74, h * .48, mirrored);
+  drawCornerCrop(frame, suitCrop, x, y + h * .5, w * .74, h * .48, mirrored);
+  return true;
 }
 
 function paperRatio(canvas) {
@@ -292,20 +303,22 @@ function paperRatio(canvas) {
   return paper / (data.length / 4);
 }
 
-function motionScore() {
+function motionScore(history, mirrored) {
   const current = new Uint8Array((rankCrop.width * rankCrop.height + suitCrop.width * suitCrop.height));
   let offset = 0;
   for (const canvas of [rankCrop, suitCrop]) {
     const data = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data;
     for (let i = 0; i < data.length; i += 4) current[offset++] = Math.round((data[i] * 3 + data[i + 1] * 6 + data[i + 2]) / 10);
   }
-  const difference = meanPixelDifference(previousScanPixels, current);
-  previousScanPixels = current;
+  const difference = meanPixelDifference(history.get(mirrored), current);
+  history.set(mirrored, current);
   return difference;
 }
 
 function recognizePreparedCard() {
   const suitCtx = suitCrop.getContext('2d', { willReadFrequently: true });
+  const suit = identifySuit(suitCtx, 0, 0, suitCrop.width, suitCrop.height);
+  if (!suit) return null;
 
   let rank = identifyRank(rankCrop)?.rank ?? null;
   if (!rank) {
@@ -315,17 +328,39 @@ function recognizePreparedCard() {
     } catch {}
   }
   if (!rank || !ranks.includes(rank)) return null;
-  const suit = identifySuit(suitCtx, 0, 0, suitCrop.width, suitCrop.height);
-  if (!suit) return null;
   return { rank, suit: suit.suit, score: suit.score };
 }
 
-export function recognizeCard(frameCtx, frameWidth, frameHeight) {
-  const crops = prepareCardCrops(frameWidth, frameHeight);
-  return crops ? recognizePreparedCard() : null;
+function readCardView(frame, history, mirrored) {
+  if (!prepareCardCrops(frame, mirrored)) {
+    history.delete(mirrored);
+    return { card: null, motion: Infinity, paper: 0 };
+  }
+  const motion = motionScore(history, mirrored);
+  const paper = Math.min(paperRatio(rankCrop), paperRatio(suitCrop));
+  const card = paper >= .55 ? recognizePreparedCard() : null;
+  return { card, motion, paper };
 }
 
-function updateStatus(vi, en) { $('assistant-scan-status').textContent = text(vi, en); }
+export function scanCardFrame(frame, history) {
+  const normal = readCardView(frame, history, false);
+  const mirrored = readCardView(frame, history, true);
+  const card = agreeOnCard(normal.card, mirrored.card);
+  const eligible = card
+    ? [normal, mirrored].filter(view => view.card)
+    : [normal, mirrored].filter(view => view.paper >= .55);
+  return {
+    card,
+    motion: Math.min(...eligible.map(view => view.motion)),
+    paper: Math.max(normal.paper, mirrored.paper),
+  };
+}
+
+function updateStatus(vi, en) {
+  const status = $('assistant-scan-status');
+  const message = text(vi, en);
+  if (status.textContent !== message) status.textContent = message;
+}
 
 async function requestWakeLock() {
   if (!('wakeLock' in navigator)) return false;
@@ -341,7 +376,8 @@ function stopTracks() {
   wakeLock = undefined;
   scanning = false;
   stableCardGate.reset();
-  previousScanPixels = undefined;
+  lastVideoTime = -1;
+  previousScanPixels.clear();
   document.body.classList.remove('assistant-scanning');
   if (originalThemeColor !== undefined) document.querySelector('meta[name="theme-color"]').content = originalThemeColor;
   originalThemeColor = undefined;
@@ -362,7 +398,7 @@ async function start() {
     fullscreenRequest = document.documentElement.requestFullscreen?.();
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 24 } },
+      video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } },
     });
     const video = $('assistant-video');
     video.srcObject = stream;
@@ -398,28 +434,26 @@ async function start() {
 
 function scanLoop() {
   if (!scanning) return;
+  const now = performance.now();
   const video = $('assistant-video');
-  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && performance.now() - lastScanAt >= 240) {
-    lastScanAt = performance.now();
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
     const ctx = capture.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(video, 0, 0, capture.width, capture.height);
-    const crops = prepareCardCrops(capture.width, capture.height);
-    const paper = crops ? Math.min(paperRatio(rankCrop), paperRatio(suitCrop)) : 0;
-    const stillness = crops ? motionScore() : Infinity;
-    const found = paper >= .55 && stillness <= 7 ? recognizePreparedCard() : null;
-    const accepted = stableCardGate.update(found, stillness, performance.now());
+    const { card: found, motion: stillness, paper } = scanCardFrame(capture, previousScanPixels);
+    const accepted = stableCardGate.update(found, stillness, now);
+    const result = $('assistant-card-result');
+    const name = accepted ? `${accepted.rank}${suitSymbols[accepted.suit]}` : '';
+    if (result.textContent !== name) result.textContent = name;
     if (accepted) {
-        const name = `${accepted.rank}${suitSymbols[accepted.suit]}`;
-        $('assistant-card-result').textContent = name;
-        updateStatus('Đã nhận diện', 'Card recognized');
+      updateStatus('Đã nhận diện', 'Card recognized');
     } else {
-      $('assistant-card-result').textContent = '';
-      if (stillness > 7) updateStatus('Giữ lá bài yên khoảng nửa giây', 'Hold the card still for about half a second');
-      else if (paper < .55) updateStatus('Đưa góc lá bài sáng vào giữa camera', 'Center the light card corner in the camera view');
+      if (paper < .55) updateStatus('Đưa góc lá bài sáng vào giữa camera', 'Center the light card corner in the camera view');
+      else if (stillness > 7 || found) updateStatus('Giữ lá bài yên khoảng 0,2 giây', 'Hold the card still for about 0.2 seconds');
       else updateStatus('Đọc hạng và chất ở góc bài', 'Reading rank and suit from the card corner');
     }
   }
-  frameTimer = setTimeout(scanLoop, 80);
+  frameTimer = setTimeout(scanLoop, Math.max(0, scanIntervalMs - (performance.now() - now)));
 }
 
 $('assistant-start').addEventListener('click', start);

@@ -5,7 +5,12 @@ export function meanPixelDifference(previous, current) {
   return difference / current.length;
 }
 
-export function createStableCardGate({ maxMotion = 7, minFrames = 3, minDuration = 500 } = {}) {
+export function agreeOnCard(normal, mirrored) {
+  if (normal && mirrored && (normal.rank !== mirrored.rank || normal.suit !== mirrored.suit)) return null;
+  return normal ?? mirrored;
+}
+
+export function createStableCardGate({ maxMotion = 7, minFrames = 3, minDuration = 200 } = {}) {
   let candidateKey = '';
   let candidateSince = 0;
   let candidateFrames = 0;
@@ -18,16 +23,18 @@ export function createStableCardGate({ maxMotion = 7, minFrames = 3, minDuration
 
   return {
     update(card, motion, now) {
-      if (!card || !Number.isFinite(motion) || motion > maxMotion) {
+      if (!card) {
         reset();
         return null;
       }
       const key = `${card.rank}${card.suit}`;
-      if (key !== candidateKey) {
+      if (key !== candidateKey || !Number.isFinite(motion) || motion > maxMotion) {
         candidateKey = key;
         candidateSince = now;
         candidateFrames = 1;
-      } else candidateFrames++;
+        return null;
+      }
+      candidateFrames++;
       return candidateFrames >= minFrames && now - candidateSince >= minDuration ? card : null;
     },
     reset,

@@ -1,37 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
+import { agreeOnCard, createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
 
 const card = { rank: 'Q', suit: 'S' };
 
-test('does not accept a card until three matching frames stay still for half a second', () => {
+test('accepts either camera orientation and rejects conflicting reads', () => {
+  assert.equal(agreeOnCard(card, null), card);
+  assert.equal(agreeOnCard(null, card), card);
+  assert.equal(agreeOnCard(card, { ...card }), card);
+  assert.equal(agreeOnCard(card, { ...card, rank: '9' }), null);
+  assert.equal(agreeOnCard(card, { ...card, suit: 'C' }), null);
+  assert.equal(agreeOnCard(null, null), null);
+});
+
+test('requires at least three matching frames over 200 ms', () => {
   const gate = createStableCardGate();
   assert.equal(gate.update(card, Infinity, 0), null);
-  assert.equal(gate.update(card, 0, 240), null);
-  assert.equal(gate.update(card, 0, 480), null);
-  assert.equal(gate.update(card, 0, 720), null);
-  assert.deepEqual(gate.update(card, 0, 740), card);
+  assert.equal(gate.update(card, 0, 80), null);
+  assert.equal(gate.update(card, 0, 199), null);
+  assert.deepEqual(gate.update(card, 0, 200), card);
+  gate.reset();
+  assert.equal(gate.update(card, Infinity, 0), null);
+  assert.equal(gate.update(card, 0, 200), null);
+  assert.deepEqual(gate.update(card, 0, 250), card);
 });
 
 test('a moving hand resets the candidate and hides a previously accepted card', () => {
   const gate = createStableCardGate();
   gate.update(card, 0, 0);
-  gate.update(card, 0, 240);
-  assert.deepEqual(gate.update(card, 0, 500), card);
-  assert.equal(gate.update(card, 18, 740), null);
-  assert.equal(gate.update(card, 0, 980), null);
-  assert.equal(gate.update(card, 0, 1220), null);
-  assert.deepEqual(gate.update(card, 0, 1480), card);
+  gate.update(card, 0, 80);
+  assert.deepEqual(gate.update(card, 0, 200), card);
+  assert.equal(gate.update(card, 18, 260), null);
+  assert.equal(gate.update(card, 18, 330), null);
+  assert.equal(gate.update(card, 0, 420), null);
+  assert.equal(gate.update(card, 0, 529), null);
+  assert.deepEqual(gate.update(card, 0, 530), card);
 });
 
 test('a card change starts a fresh stability window', () => {
   const gate = createStableCardGate();
   gate.update(card, 0, 0);
-  gate.update(card, 0, 240);
+  gate.update(card, 0, 80);
   const other = { rank: '7', suit: 'H' };
-  assert.equal(gate.update(other, 0, 480), null);
-  assert.equal(gate.update(other, 0, 720), null);
-  assert.deepEqual(gate.update(other, 0, 980), other);
+  assert.equal(gate.update(other, 0, 180), null);
+  assert.equal(gate.update(other, 0, 310), null);
+  assert.deepEqual(gate.update(other, 0, 380), other);
 });
 
 test('pixel motion is measured as average gray-level change', () => {

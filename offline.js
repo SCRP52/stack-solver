@@ -1,4 +1,4 @@
-const cacheName = 'stack-solver-v14';
+const cacheName = 'stack-solver-v15';
 const assets = ['./', './index.html', './app.css', './app.mjs', './i18n.mjs', './solver.mjs', './presets.mjs', './worker.mjs'];
 
 self.addEventListener('install', event => {

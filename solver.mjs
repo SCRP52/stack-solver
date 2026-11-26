@@ -337,10 +337,10 @@ const isCull = move => move?.kind === 'cull' || move?.kind === 'reverse-cull';
 const sameCull = (a, b) => isCull(a) && isCull(b);
 const isHeavy = move => isCull(move) || move?.kind === 'multi-cut';
 
-function handlingPenalty(move, neighbor) {
+function handlingPenalty(move, neighbor, packetStreak) {
   let penalty = isHeavy(move) ? 2 : 0;
-  if (move.kind === 'multi-cut' && neighbor?.kind === 'multi-cut') penalty += 2;
-  else if ((isCull(move) && neighbor?.kind === 'cut') || (isCull(neighbor) && move.kind === 'cut')) penalty++;
+  if (packetStreak >= 4) penalty += 2 * (packetStreak - 2);
+  if ((isCull(move) && neighbor?.kind === 'cut') || (isCull(neighbor) && move.kind === 'cut')) penalty++;
   return penalty;
 }
 
@@ -610,7 +610,7 @@ function searchPractical(start, target, required, moves, expired, offer, enough,
   const operations = moves.list.filter(move => !isCull(move));
   if (!operations.some(move => move.kind !== 'cut')) return;
   function side(state, wanted, backward) {
-    const root = { state, handling: 0 };
+    const root = { state, handling: 0, packetStreak: 0 };
     const weights = Array.from({ length: size }, () => new Uint8Array(size));
     const nextCard = new Uint8Array(size);
     for (const [slot, card] of required ?? [...wanted].map((card, slot) => [slot, card])) {
@@ -647,12 +647,13 @@ function searchPractical(start, target, required, moves, expired, offer, enough,
         if (parent.move?.kind === 'cut' && move.kind === 'cut') continue;
         const state = backward ? move.undo(parent.state) : move.apply(parent.state);
         const match = other.seen?.get(state);
-        const handling = parent.handling + handlingPenalty(move, parent.move);
-        const node = { state, parent, move, handling };
+        const packetStreak = move.kind === 'multi-cut' ? parent.packetStreak + 1 : 0;
+        const handling = parent.handling + handlingPenalty(move, parent.move, packetStreak);
+        const node = { state, parent, move, handling, packetStreak };
         if (match) offer(backward ? readRoute(match, node) : readRoute(node, match));
         if (required?.every(([slot, card]) => state[slot] === card)) { offer(readRoute(node, right.root)); continue; }
         const prior = candidates.get(state) ?? current.seen.get(state);
-        if (prior && prior.handling <= handling) continue;
+        if (prior && (prior.handling < handling || (prior.handling === handling && prior.packetStreak <= packetStreak))) continue;
         let score = -6 * handling;
         let previous = index(state.at(-1));
         for (let slot = 0; slot < size; slot++) {
@@ -1172,9 +1173,11 @@ function routeCost(route) {
   let heavy = 0;
   let score = route.length;
   let topDown = 0;
+  let packetStreak = 0;
   for (let i = 0; i < route.length; i++) {
     const move = route[i];
-    score += handlingPenalty(move, route[i - 1]);
+    packetStreak = move.kind === 'multi-cut' ? packetStreak + 1 : 0;
+    score += handlingPenalty(move, route[i - 1], packetStreak);
     if (isHeavy(move)) heavy++;
     if (isCull(move) && move.params.direction === 'down') topDown++;
   }
@@ -1354,10 +1357,13 @@ export function solve(start, requested, options, limits, notify = () => {}) {
       let state = checkpoints[anchor];
       const prefix = anchor ? savedRoute.slice(0, anchor) : [];
       const length = 1 + (attempts % (splice ? 3 : 7));
+      let packetStreak = 0;
+      for (let i = prefix.length - 1; prefix[i]?.kind === 'multi-cut'; i--) packetStreak++;
       for (let i = 0; i < length; i++) {
-        const tryPacketCut = !simpleMoves.length || (prefix.at(-1)?.kind !== 'multi-cut' && attempts % 3 === 0);
+        const tryPacketCut = !simpleMoves.length || (packetStreak < 3 && attempts % 3 === 0);
         const move = varyMove(state, target, moves, tryPacketCut ? varied : simpleMoves, tryPacketCut);
         prefix.push(move);
+        packetStreak = move.kind === 'multi-cut' ? packetStreak + 1 : 0;
         state = move.apply(state);
         if (required && matches(state)) break;
       }

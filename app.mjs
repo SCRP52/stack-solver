@@ -4,7 +4,7 @@ import { ConverterError, message } from './i18n.mjs';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'stack-solver-history-v1';
-const rankVersion = 2;
+const rankVersion = 3;
 const languageKey = 'stack-converter-language';
 const suits = { S: '♠', D: '♦', C: '♣', H: '♥' };
 const families = ['out', 'in', 'near', 'cut', 'run', 'reverse', 'cull', 'deal'];

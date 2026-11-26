@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0d0d0d">
   <meta name="description" content="Find a sequence of moves to convert one playing-card stack into another.">
   <title>Stack Converter</title>
-  <link rel="stylesheet" href="./app.css?v=33">
+  <link rel="stylesheet" href="./app.css?v=35">
 </head>
 <body>
   <header class="header">
@@ -127,7 +127,7 @@
             <div><label for="deal-order" data-en="Pile pickup order">Cách gom tụ</label><select id="deal-order" data-lock><option value="ordered" data-en="Forward / reverse cycle">Theo vòng xuôi / ngược</option><option value="any" data-en="Any order">Gom tự do</option></select></div>
             <div><label for="seconds" data-en="Search time limit">Thời gian tìm tối đa</label><select id="seconds" data-lock>
               <option value="30" data-en="30 seconds">30 giây</option><option value="300" data-en="5 minutes" selected>5 phút</option><option value="600" data-en="10 minutes">10 phút</option>
-              <option value="900" data-en="15 minutes">15 phút</option><option value="1200" data-en="20 minutes">20 phút</option><option value="1800" data-en="30 minutes">30 phút</option>
+              <option value="900" data-en="15 minutes">15 phút</option><option value="1200" data-en="20 minutes">20 phút</option><option value="1800" data-en="30 minutes">30 phút</option><option value="3600" data-en="60 minutes">60 phút</option>
             </select></div>
           </div>
           <div class="options">
@@ -177,6 +177,7 @@
               <ol id="cull-events" class="cull-events" hidden></ol>
               <div id="deck-grid" class="deck-grid" aria-label="Thứ tự lá ở nước đang chọn" data-en-aria="Card order after this move"></div>
             </div>
+            <p id="replay-note" class="hint" hidden data-en="Verified by replaying every move.">Đã mô phỏng lại từng nước và xác nhận khớp đích.</p>
             <ol id="step-list" class="step-list"></ol>
             <p class="hint" id="saved-note"></p>
           </article>
@@ -184,11 +185,19 @@
       </div>
     </div>
   </main>
+  <dialog id="move-guide" aria-labelledby="move-guide-title">
+    <div class="panel-title">
+      <h2 id="move-guide-title"></h2>
+      <form method="dialog"><button class="quiet" aria-label="Đóng" data-en-aria="Close">✕</button></form>
+    </div>
+    <p id="move-guide-detail"></p>
+    <ol id="move-guide-actions" class="move-guide-actions" hidden></ol>
+  </dialog>
   <dialog id="history">
     <div class="panel-title"><h2 data-en="Saved routes">Chuỗi đã lưu</h2><form method="dialog"><button class="quiet" aria-label="Đóng" data-en-aria="Close">✕</button></form></div>
     <ul id="history-list" class="history-list"></ul>
     <p class="hint" data-en="Stacks and routes are stored in this browser.">Các stack và lời giải được lưu trong trình duyệt này.</p>
   </dialog>
-  <script type="module" src="./app.mjs?v=33"></script>
+  <script type="module" src="./app.mjs?v=35"></script>
 </body>
 </html>

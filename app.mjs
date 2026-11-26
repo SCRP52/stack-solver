@@ -1,6 +1,6 @@
-import { cardCode, cullTimeline, defaults, parseCards, parsePositions, displayCards, ranks } from './solver.mjs?v=32';
+import { cardCode, cullTimeline, defaults, parseCards, parsePositions, displayCards, ranks } from './solver.mjs?v=35';
 import { languageKey, library, libraryKey, saveStack, stackOrder } from './stack-library.mjs';
-import { ConverterError, message } from './i18n.mjs?v=32';
+import { ConverterError, message } from './i18n.mjs?v=35';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'stack-solver-history-v1';
@@ -410,6 +410,57 @@ function cullDescriptions(step, before) {
   });
 }
 
+function stepActions(step, before) {
+  const guide = cutGuide(step, before);
+  const actions = guide?.gaps.map(({ above, below, slot }) => t('cutBetween', cardAt(above, slot), cardAt(below, slot + 1))) ?? [];
+  if (guide?.packets.length) actions.push(t('collect', guide.packets.map(({ number }) => number).join(' → ')));
+  return actions.concat(cullDescriptions(step, before));
+}
+
+function showMoveGuide(step, number, total, detail, actions) {
+  const dialog = $('move-guide');
+  $('move-guide-title').textContent = `${t('step', number, total)} · ${moveName(step)}`;
+  $('move-guide-detail').replaceChildren(...cardReferences(detail));
+  const list = $('move-guide-actions');
+  list.hidden = !actions.length;
+  list.replaceChildren(...actions.map(action => {
+    const item = document.createElement('li');
+    item.append(...cardReferences(action));
+    return item;
+  }));
+  if (!dialog.open) dialog.showModal();
+}
+
+function addHoldAction(button, openGuide, select) {
+  let timer;
+  let origin;
+  let held = false;
+  const cancel = () => {
+    clearTimeout(timer);
+    origin = null;
+  };
+  button.addEventListener('pointerdown', event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    cancel();
+    held = false;
+    origin = { x: event.clientX, y: event.clientY };
+    timer = setTimeout(() => {
+      if (!button.isConnected) return;
+      held = true;
+      openGuide();
+    }, 480);
+  });
+  button.addEventListener('pointermove', event => {
+    if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 12) cancel();
+  });
+  for (const event of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) button.addEventListener(event, cancel);
+  button.addEventListener('contextmenu', event => event.preventDefault());
+  button.addEventListener('click', event => {
+    if (!held || event.detail === 0) select();
+    held = false;
+  });
+}
+
 function makeCard(card) {
   const element = document.createElement('span');
   element.className = /[DH]$/.test(card) ? 'card red' : 'card';
@@ -490,6 +541,7 @@ function renderSolution() {
   const steps = routes[currentRoute];
   $('solution').hidden = false;
   $('partial-note').hidden = !session.startPositions;
+  $('replay-note').hidden = !session.replayVerified;
   $('study').hidden = false;
   $('route-picker').hidden = routes.length < 2;
   if (routes.length > 1) {
@@ -502,37 +554,51 @@ function renderSolution() {
   $('move-unit').textContent = language === 'vi' ? 'nước' : steps.length === 1 ? 'move' : 'moves';
   $('move-operations').textContent = t('moveOperations', cullCount(steps), packetCutCount(steps));
   $('copy').disabled = steps.length === 0;
-  stepButtons = steps.map((step, index) => {
+  const initial = session.routeStarts?.[currentRoute] ?? session.startCards;
+  const items = steps.map((step, index) => {
+    const before = steps[index - 1]?.deck ?? initial;
+    const detail = instructions(step);
+    const actions = stepActions(step, before);
+    const openGuide = () => showMoveGuide(step, index + 1, steps.length, detail, actions);
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'quiet';
+    button.className = 'quiet step-select';
+    button.title = [detail, ...actions].join('\n');
     const number = document.createElement('span');
     number.className = 'number';
     number.textContent = index + 1;
     const label = document.createElement('span');
     label.append(...cardReferences(moveName(step)));
     button.append(number, label);
-    button.addEventListener('click', () => {
+    addHoldAction(button, openGuide, () => {
       showStep(index + 1);
       $('study').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
-    return button;
-  });
-  $('step-list').replaceChildren(...stepButtons.map(button => {
+    const info = document.createElement('button');
+    info.type = 'button';
+    info.className = 'quiet step-info';
+    info.textContent = 'ⓘ';
+    info.setAttribute('aria-label', t('moveDescription', index + 1));
+    info.setAttribute('aria-haspopup', 'dialog');
+    info.setAttribute('aria-controls', 'move-guide');
+    info.addEventListener('click', openGuide);
     const item = document.createElement('li');
-    item.append(button);
-    return item;
-  }));
+    item.append(button, info);
+    return { item, button };
+  });
+  stepButtons = items.map(({ button }) => button);
+  $('step-list').replaceChildren(...items.map(({ item }) => item));
   showStep(Math.min(currentStep, steps.length));
 }
 
-function receiveRoutes({ steps, routes = steps ? [steps] : [], shortestLength = steps?.length, practicalScore, routeStarts }) {
+function receiveRoutes({ steps, routes = steps ? [steps] : [], shortestLength = steps?.length, practicalScore, routeStarts, replayVerified }) {
   const previous = session.routes?.[currentRoute];
   session.steps = steps;
   session.routes = routes;
   session.routeStarts = routeStarts;
   session.shortestLength = shortestLength;
   session.practicalScore = practicalScore;
+  session.replayVerified = replayVerified;
   if (!currentRoute || !previous) return;
   const signature = route => JSON.stringify(route.map(step => [step.kind, step.params]));
   const index = routes.findIndex(route => signature(route) === signature(previous));
@@ -691,7 +757,7 @@ $('solver-form').addEventListener('submit', event => {
     $('meter').value = 0;
     $('elapsed').textContent = '0:00';
     setCopy('proof', 'openProof');
-    worker = new Worker(new URL('./worker.mjs?v=32', import.meta.url), { type: 'module' });
+    worker = new Worker(new URL('./worker.mjs?v=35', import.meta.url), { type: 'module' });
     setLocked(true);
     if (matchMedia('(max-width: 814px)').matches) $('work').scrollIntoView({ block: 'start', behavior: 'smooth' });
     worker.onmessage = ({ data }) => {
@@ -772,10 +838,7 @@ $('copy').addEventListener('click', async () => {
     const steps = session.routes?.[currentRoute] ?? session.steps;
     const lines = steps.map((step, index) => {
       const before = steps[index - 1]?.deck ?? session.routeStarts?.[currentRoute] ?? session.startCards;
-      const guide = cutGuide(step, before);
-      const cuts = guide ? guide.gaps.map(({ above, below, slot }) => t('cutBetween', cardAt(above, slot), cardAt(below, slot + 1))) : [];
-      if (guide?.packets.length) cuts.push(t('collect', guide.packets.map(({ number }) => number).join(' → ')));
-      return [`${index + 1}. ${moveName(step)}`, instructions(step), ...cuts, ...cullDescriptions(step, before)].join('\n');
+      return [`${index + 1}. ${moveName(step)}`, instructions(step), ...stepActions(step, before)].join('\n');
     });
     await navigator.clipboard.writeText(lines.join('\n'));
     setCopy('copy', 'copied');

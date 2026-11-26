@@ -933,6 +933,31 @@ function readRoute(left, right) {
   return before.reverse().concat(after);
 }
 
+function faroSignatures(target, suffixes, reversals, expired) {
+  const anchors = [target[0], target[1], target[2], target[3]];
+  const byMirrors = new Set();
+  const flipPrefix = (slot, length) => slot < length ? length - 1 - slot : slot;
+  const lengths = [0, ...reversals.map(move => move.params.n)];
+  const radix = catalogSize;
+  // A perfect Faro preserves the identity of each mirror partner. Include suffix
+  // states both as they stand and before each permitted prefix reversal.
+  function key(state, slots, reverseLength) {
+    let code = 0;
+    for (const slot of slots) {
+      const mirrored = flipPrefix(size - 1 - flipPrefix(slot, reverseLength), reverseLength);
+      code = code * radix + index(state[mirrored]);
+    }
+    return code;
+  }
+  const slotsFor = state => anchors.map(card => state.indexOf(card));
+  for (const state of suffixes.keys()) {
+    if (expired()) return null;
+    const slots = slotsFor(state);
+    for (const length of lengths) byMirrors.add(key(state, slots, length));
+  }
+  return state => byMirrors.has(key(state, slotsFor(state), 0));
+}
+
 // Search routes that prepare four 13-card blocks, use whole-deck faros, then
 // finish with a reversal, partial weave or deal, and cut. This applies to any
 // pair of decks and produces candidates checked by the same replay as BFS.
@@ -968,32 +993,34 @@ function findStructured(start, target, moves, expired, offer, enough, suggestPac
     for (const move of finishingMoves) addSuffix(move.undo(beforeCut), [move, ...trail]);
   }
 
+  const eligible = faros.length && size >= 4 ? faroSignatures(target, suffixes, reversals, expired) : null;
+  const expanded = moves.wideDeal || moves.wideMultiCut;
   let frontier = [{ state: start, route: [] }];
   const seen = new Map([[start, { depth: 0, count: 1 }]]);
 
-  function join(state, route, reverse) {
+  function join(state, route, reverse, couldMatch = true) {
     const prefix = reverse ? route.concat(reverse) : route;
-    const tails = suffixes.get(state);
+    const tails = couldMatch && suffixes.get(state);
     if (tails) {
       for (const tail of tails) offer(prefix.concat(tail));
-    } else if (!reverse && (moves.wideDeal || moves.wideMultiCut)) {
+    } else if (!reverse && expanded) {
       const last = directExpandedMove(state, target, moves, false);
       if (last) offer(prefix.concat(last));
       else if (moves.wideMultiCut) suggestPackets(state, route);
     }
   }
 
-  function weave(state, route, count) {
+  function weave(state, route, count, couldMatch) {
     if (expired() || enough(route.length - 1)) return;
-    join(state, route);
-    if (!enough(route.length)) {
+    join(state, route, null, couldMatch);
+    if (couldMatch && !enough(route.length)) {
       if (endings.has(state.slice(window))) {
         for (const reverse of shortReversals) join(reverse.apply(state), route, reverse);
       }
       for (const reverse of longReversals) join(reverse.apply(state), route, reverse);
     }
     if (count < 6) {
-      for (const faro of faros) weave(faro.apply(state), route.concat(faro), count + 1);
+      for (const faro of faros) weave(faro.apply(state), route.concat(faro), count + 1, couldMatch);
     }
   }
 
@@ -1001,7 +1028,9 @@ function findStructured(start, target, moves, expired, offer, enough, suggestPac
     const next = [];
     for (const { state, route } of frontier) {
       if (expired()) return;
-      weave(state, route, 0);
+      const couldMatch = !eligible || eligible(state);
+      // Expanded deal and packet cuts can still produce a result outside the suffix index.
+      if (couldMatch || expanded) weave(state, route, 0, couldMatch);
       if (depth === 5 || enough(depth)) continue;
       for (const move of blockMoves) {
         const neighbor = move.apply(state);

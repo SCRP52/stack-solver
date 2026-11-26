@@ -1,6 +1,6 @@
-const cacheName = 'stack-solver-v34';
-const assets = ['./', './index.html', './app.css?v=33', './app.mjs', './i18n.mjs', './solver.mjs', './presets.mjs', './worker.mjs',
-  './app.mjs?v=33', './solver.mjs?v=32', './worker.mjs?v=32', './i18n.mjs?v=32',
+const cacheName = 'stack-solver-v35';
+const assets = ['./', './index.html', './app.css?v=33', './app.css?v=35', './app.mjs', './i18n.mjs', './solver.mjs', './presets.mjs', './worker.mjs',
+  './app.mjs?v=35', './solver.mjs?v=35', './worker.mjs?v=35', './i18n.mjs?v=35', './route-replay.mjs?v=35',
   './trainer.html', './trainer.css?v=33', './trainer.mjs?v=34', './trainer-copy.mjs?v=30', './trainer-progress.mjs', './drills.mjs', './stack-library.mjs', './stack-csv.mjs',
   './beyond.mjs?v=34', './beyond-copy.mjs?v=34', './jazzing.mjs?v=34', './drills.mjs?v=33'];
 

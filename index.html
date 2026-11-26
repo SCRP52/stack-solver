@@ -10,7 +10,7 @@
 </head>
 <body>
   <header class="header">
-    <a class="brand" href="./"><span aria-hidden="true">♠</span> Stack Converter</a>
+    <a class="brand" href="./trainer.html" aria-label="Mở Trainer" data-en-aria="Open Trainer"><span aria-hidden="true">♠</span> Stack Converter</a>
     <div class="header-actions">
       <button type="button" class="quiet" id="history-button"><span data-en="Saved">Đã lưu</span> <span id="history-count">0</span></button>
       <button type="button" class="secondary language" id="language" aria-label="Switch to English" lang="en">EN</button>
@@ -69,6 +69,11 @@
         </div>
         <label for="name"><span data-en="Save as">Tên để lưu</span> <span class="muted" data-en="(optional)">(tùy chọn)</span></label>
         <input id="name" data-lock maxlength="60" type="text" placeholder="Stack của tôi" data-en-placeholder="My stack">
+        <div id="library-actions" class="actions library-actions">
+          <button type="button" class="quiet" id="save-initial-stack" data-lock data-en="Save initial stack">Lưu stack ban đầu</button>
+          <button type="button" class="quiet" id="save-target-stack" data-lock data-en="Save target stack">Lưu stack đích</button>
+        </div>
+        <p id="library-status" class="hint" role="status" hidden></p>
         <details class="settings">
           <summary data-en="Moves and time limit">Chọn nước đi và thời gian</summary>
           <div class="options" id="move-options">

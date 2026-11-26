@@ -1,11 +1,10 @@
 import { cardCode, cullTimeline, defaults, parseCards, parsePositions, displayCards } from './solver.mjs';
-import { findPreset, getPreset, presets } from './presets.mjs';
+import { languageKey, library, libraryKey, saveStack, stackOrder } from './stack-library.mjs';
 import { ConverterError, message } from './i18n.mjs';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'stack-solver-history-v1';
 const rankVersion = 3;
-const languageKey = 'stack-converter-language';
 const suits = { S: '♠', D: '♦', C: '♣', H: '♥' };
 const families = ['out', 'in', 'near', 'cut', 'run', 'reverse', 'cull', 'deal'];
 const extraFamilies = [['reverse-cull', 'reverseCull'], ['multi-cut', 'multiCut']];
@@ -19,6 +18,9 @@ let currentRoute = 0;
 let stepButtons = [];
 let language = 'vi';
 let size = 52;
+let presets = [];
+const getPreset = id => presets.find(preset => preset.id === id);
+const findPreset = cards => presets.find(preset => stackOrder(preset.cards) === stackOrder(cards));
 const gridDrafts = new Map();
 const gridNames = ['start-positions', 'target-positions', 'start-packet', 'target-packet'];
 try { if (localStorage.getItem(languageKey) === 'en') language = 'en'; } catch {}
@@ -96,6 +98,7 @@ function updateTargetMode() {
   $('partial-target').hidden = !partial;
   $('target-full-fields').hidden = size !== 52;
   $('target-packet').hidden = size === 52;
+  $('save-target-stack').hidden = partial;
   showError();
 }
 
@@ -107,6 +110,7 @@ function updateStart() {
   $('start-pos-fields').hidden = $('start').value !== 'partial';
   $('start-preview').hidden = !preset;
   $('start-preview').value = preset?.cards.join(' ') ?? '';
+  $('save-initial-stack').hidden = !custom && !preset;
 }
 
 function loadCards(cards, name) {
@@ -120,18 +124,19 @@ function loadCards(cards, name) {
 }
 
 function installPresetOptions() {
+  presets = library();
   for (const id of ['start', 'target-preset']) {
     const select = $(id);
     const selected = select.value;
     select.replaceChildren();
     select.add(new Option(t(id === 'start' ? 'startPlaceholder' : 'targetPlaceholder'), ''));
-    for (const category of size === 52 ? ['Bộ mới', 'Stack'] : []) {
+    for (const category of size === 52 ? ['Bộ mới', 'Stack', 'custom'] : []) {
       const group = document.createElement('optgroup');
-      group.label = t(category === 'Bộ mới' ? 'factoryStacks' : 'presets');
+      group.label = category === 'custom' ? 'Custom Stack' : t(category === 'Bộ mới' ? 'factoryStacks' : 'presets');
       for (const preset of presets.filter(entry => entry.category === category)) {
         group.append(new Option(presetName(preset), preset.id));
       }
-      select.append(group);
+      if (group.children.length) select.append(group);
     }
     if (id === 'start') {
       select.add(new Option(t('customStart'), 'custom'));
@@ -143,6 +148,22 @@ function installPresetOptions() {
 }
 
 const presetName = preset => ['phoenix', 'stebbins'].includes(preset.id) ? t(preset.id) : preset.label;
+
+function saveLibraryStack(initial) {
+  if (size !== 52 || (initial ? $('start').value === 'partial' : $('target-mode').value === 'partial')) return;
+  try {
+    const preset = getPreset($('start').value);
+    const raw = initial ? (preset ? stackOrder(preset.cards) : $('start-custom').value) : $('target').value;
+    const stored = saveStack($('name').value, raw);
+    installPresetOptions();
+    $(initial ? 'start' : 'target-preset').value = stored.id;
+    updateStart();
+    setCopy('library-status', 'librarySaved', presetName(stored));
+  } catch (error) {
+    setCopy('library-status', error.code ?? (error.message === 'stackName' ? 'stackName' : 'librarySaveError'), ...(error.parameters ?? []));
+  }
+  $('library-status').hidden = false;
+}
 
 function readGrid(id) {
   const key = `${id}:${size}`;
@@ -220,6 +241,8 @@ function updateDeck() {
     installPresetOptions();
     renderGrids();
   }
+  $('library-actions').hidden = size !== 52;
+  $('library-status').hidden = true;
   updateStart();
   updateTargetMode();
   return true;
@@ -657,6 +680,10 @@ $('solver-form').addEventListener('submit', event => {
 $('target').addEventListener('input', () => { $('target-preset').value = ''; updateCount(); showError(); });
 $('target-mode').addEventListener('change', updateTargetMode);
 $('start').addEventListener('change', () => { updateStart(); showError(); });
+$('save-initial-stack').addEventListener('click', () => saveLibraryStack(true));
+$('save-target-stack').addEventListener('click', () => saveLibraryStack(false));
+window.addEventListener('storage', event => { if (event.key === libraryKey) installPresetOptions(); });
+window.addEventListener('pageshow', event => { if (event.persisted) installPresetOptions(); });
 $('deck-format').addEventListener('change', updateDeck);
 $('packet-size').addEventListener('change', updateDeck);
 $('reverse-start').addEventListener('click', () => reverseInput('start'));

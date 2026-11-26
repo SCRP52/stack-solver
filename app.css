@@ -59,6 +59,8 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; line-height: 
 .counter { float: right; color: var(--subtle); font-variant-numeric: tabular-nums; }
 .counter.full { color: var(--accent); }
 .actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.library-actions { margin-top: 4px; }
+.library-actions .quiet { font-size: .82rem; }
 .quiet, .secondary, .primary { min-height: 44px; border-radius: 8px; padding: 8px 12px; font-weight: 690; border: 1px solid transparent; }
 .quiet { background: transparent; color: inherit; }
 .quiet:hover, .secondary:hover { background: var(--accent-wash); }

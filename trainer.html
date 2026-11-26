@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0d0d">
+  <title>Trainer · THISDECK</title>
+  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" href="./trainer.css">
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="./"><span aria-hidden="true">♠</span> THISDECK</a>
+    <div class="header-actions">
+      <a class="quiet trainer-link" href="./">Stack Converter</a>
+      <button type="button" class="secondary language" id="language" aria-label="Switch to English" lang="en">EN</button>
+    </div>
+  </header>
+  <main class="trainer-main">
+    <div class="trainer-top">
+      <h1>Trainer</h1>
+      <nav class="trainer-tabs" aria-label="Trainer">
+        <button type="button" class="quiet" data-view="learn" aria-current="page">Learn</button>
+        <button type="button" class="quiet" data-view="practice">Practice</button>
+        <button type="button" class="quiet" data-view="assistant">Assistant</button>
+      </nav>
+    </div>
+    <div class="trainer-layout">
+      <aside class="panel trainer-settings" id="trainer-settings">
+        <label for="active-stack">Stack</label>
+        <select id="active-stack"></select>
+        <details id="custom-stack">
+          <summary>Custom Stack</summary>
+          <form id="save-stack">
+            <label for="stack-name" data-en="Stack name">Tên stack</label>
+            <input id="stack-name" required maxlength="60">
+            <label for="stack-cards" data-en="52 cards from top to bottom">52 lá từ trên xuống</label>
+            <textarea id="stack-cards" required rows="4" placeholder="AS 2S 3S …" autocapitalize="characters" spellcheck="false"></textarea>
+            <p class="hint" data-en="Separate card codes with spaces, commas or newlines.">Cách mã lá bằng dấu cách, dấu phẩy hoặc xuống dòng.</p>
+            <button class="secondary" data-en="Save to library">Lưu vào thư viện</button>
+            <p class="error" id="custom-error" role="status" hidden></p>
+          </form>
+        </details>
+        <div class="range-field" id="range-field">
+          <h2>Stack Range</h2>
+          <div class="fields">
+            <div><label for="range-start" data-en="From position">Từ vị trí</label><input id="range-start" type="number" inputmode="numeric" min="1" max="52" value="1"></div>
+            <div><label for="range-end" data-en="To position">Đến vị trí</label><input id="range-end" type="number" inputmode="numeric" min="1" max="52" value="52"></div>
+          </div>
+          <div class="actions range-actions">
+            <button class="quiet" data-range="1,13">1–13</button><button class="quiet" data-range="14,26">14–26</button>
+            <button class="quiet" data-range="27,39">27–39</button><button class="quiet" data-range="40,52">40–52</button>
+            <button class="quiet" data-range="1,52">1–52</button>
+          </div>
+        </div>
+        <p id="storage-error" class="error" role="status" hidden data-en="This browser could not save your progress.">Trình duyệt không lưu được tiến độ.</p>
+      </aside>
+      <section id="learn" class="panel trainer-screen" aria-labelledby="learn-title">
+        <div class="panel-title trainer-panel-title">
+          <h2 id="learn-title">Learn</h2>
+          <div class="trainer-segment" aria-label="Learn">
+            <button type="button" class="quiet" data-learn="flip" aria-pressed="true">Flipcard</button>
+            <button type="button" class="quiet" data-learn="grid" aria-pressed="false">Grid</button>
+          </div>
+        </div>
+        <p id="weak-guide" class="hint" hidden data-en="Red borders mark cards you repeatedly missed in Practice.">Viền đỏ đánh dấu lá bạn thường trả lời sai trong Practice.</p>
+        <div id="flip-view">
+          <label for="flip-side" data-en="Show first">Mặt hiện trước</label>
+          <select id="flip-side">
+            <option value="card" data-en="Card">Quân bài</option><option value="position" data-en="Position">Vị trí</option>
+          </select>
+          <button type="button" id="flip-card" class="flip-button"></button>
+          <div class="study-controls">
+            <button type="button" class="quiet" id="flip-prev" aria-label="Lá trước" data-en-aria="Previous card">←</button>
+            <span id="flip-progress" class="muted"></span>
+            <button type="button" class="quiet" id="flip-next" aria-label="Lá sau" data-en-aria="Next card">→</button>
+          </div>
+        </div>
+        <ol id="learn-grid" class="learn-grid" hidden></ol>
+      </section>
+      <section id="practice" class="panel trainer-screen" hidden aria-labelledby="practice-title">
+        <div id="practice-setup">
+          <h2 id="practice-title">Practice</h2>
+          <div class="level-list" aria-label="Practice levels">
+            <button type="button" class="secondary" data-level="basic" aria-pressed="true"><span>Basic</span><small>Level 1</small></button>
+            <button type="button" class="secondary" data-level="advanced" aria-pressed="false"><span>Advanced</span><small>Level 2</small></button>
+            <button type="button" class="secondary" data-level="beyond" aria-pressed="false"><span>Beyond</span><small>Level 3</small></button>
+          </div>
+          <p id="beyond" class="trainer-placeholder muted" hidden data-en="Beyond is in development. It will require learning the full stack.">Beyond đang phát triển. Cần học đủ stack để mở khóa.</p>
+          <form id="practice-form">
+            <div class="trainer-segment practice-modes" aria-label="Practice mode">
+              <button type="button" class="quiet" data-mode="train" aria-pressed="true" data-en="Trainer">Tập</button>
+              <button type="button" class="quiet" data-mode="trial" aria-pressed="false" data-en="Time Trial">Thi</button>
+            </div>
+            <div class="practice-fields">
+              <div><label for="skill" data-en="Drill">Bài luyện</label><select id="skill"></select></div>
+              <div id="trial-count-field" hidden>
+                <label for="trial-count" data-en="Question count">Số câu</label>
+                <select id="trial-count"><option>13</option><option>26</option><option>52</option></select>
+              </div>
+              <div id="order-field">
+                <label for="question-order" data-en="Question order">Thứ tự câu</label>
+                <select id="question-order"><option value="random" data-en="Random">Ngẫu nhiên</option><option value="sequential" data-en="Stack order">Theo stack</option></select>
+              </div>
+              <div id="focus-field">
+                <label for="practice-focus" data-en="Review focus">Ôn tập</label>
+                <select id="practice-focus"><option value="all" data-en="All cards">Tất cả lá</option><option value="weak" data-en="Frequently missed">Lá hay sai</option><option value="slow" data-en="Slow answers">Lá trả lời chậm</option></select>
+              </div>
+              <div id="answer-mode-field">
+                <label for="answer-mode" data-en="Answer mode">Cách trả lời</label>
+                <select id="answer-mode"><option value="typed" data-en="Enter answer">Nhập đáp án</option><option value="self" data-en="Flashcard · self-grade">Flashcard · tự chấm</option></select>
+              </div>
+            </div>
+            <p id="advanced-range" class="hint" hidden data-en="Advanced uses the full 52-card stack.">Advanced dùng cả stack 52 lá.</p>
+            <p id="practice-status" class="hint" role="status"></p>
+            <button class="primary practice-start" data-en="Start">Bắt đầu</button>
+          </form>
+        </div>
+        <div id="practice-session" hidden>
+          <div class="session-head">
+            <span class="session-mode" id="session-mode"></span>
+            <span id="question-count"></span>
+            <time id="trial-time" hidden></time>
+            <button type="button" class="quiet" id="quit-practice" data-en="Exit session">Thoát lượt</button>
+          </div>
+          <progress id="trial-progress" aria-label="Tiến độ lượt thi" data-en-aria="Trial progress" hidden></progress>
+          <p id="question-skill" class="muted"></p>
+          <h2 id="question-text"></h2>
+          <div id="question-cards" class="prompt-cards" hidden></div>
+          <form id="answer-form">
+            <div id="answer-fields" class="answer-fields"></div>
+            <div class="actions session-actions">
+              <button class="primary" data-en="Submit">Trả lời</button>
+              <button type="button" class="secondary" id="skip-answer" data-en="Skip">Bỏ qua</button>
+            </div>
+          </form>
+          <button type="button" class="primary session-actions" id="reveal-answer" hidden data-en="Reveal answer">Lật đáp án</button>
+          <p class="error" role="status" id="answer-error" hidden></p>
+          <div id="self-grade" class="actions session-actions" hidden>
+            <button type="button" class="secondary" id="mark-wrong" data-en="I missed it">Mình trả lời sai</button>
+            <button type="button" class="primary" id="mark-right" data-en="I got it">Mình trả lời đúng</button>
+          </div>
+          <div id="feedback" role="status" hidden></div>
+          <button type="button" class="primary session-actions" id="next-question" hidden data-en="Next question">Câu tiếp theo</button>
+        </div>
+        <section id="trial-results" hidden aria-labelledby="results-title">
+          <h2 id="results-title" data-en="Time Trial results">Kết quả thi</h2>
+          <dl id="trial-metrics" class="trial-metrics"></dl>
+          <p class="hint" data-en="Average, fastest and slowest use correct answers. Skipped questions count as incorrect.">Trung bình, nhanh nhất và chậm nhất tính trên câu đúng. Câu bỏ qua tính là sai.</p>
+          <details id="trial-review"><summary data-en="Review answers">Xem lại câu trả lời</summary><ol id="trial-answers"></ol></details>
+          <button type="button" class="primary practice-start" id="back-to-practice" data-en="Back to Practice">Về Practice</button>
+        </section>
+      </section>
+      <section id="assistant" class="panel trainer-screen" hidden aria-labelledby="assistant-title">
+        <h2 id="assistant-title">Assistant</h2>
+        <p class="trainer-placeholder muted" data-en="Performance Assistant is in development.">Assistant hỗ trợ biểu diễn đang phát triển.</p>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="./trainer.mjs"></script>
+</body>
+</html>

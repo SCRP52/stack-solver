@@ -1,5 +1,6 @@
-const cacheName = 'stack-solver-v16';
-const assets = ['./', './index.html', './app.css', './app.mjs', './i18n.mjs', './solver.mjs', './presets.mjs', './worker.mjs'];
+const cacheName = 'stack-solver-v17';
+const assets = ['./', './index.html', './app.css', './app.mjs', './i18n.mjs', './solver.mjs', './presets.mjs', './worker.mjs',
+  './trainer.html', './trainer.css', './trainer.mjs', './trainer-copy.mjs', './trainer-progress.mjs', './drills.mjs', './stack-library.mjs'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(assets)).then(() => self.skipWaiting()));

@@ -38,6 +38,7 @@ let level = 'basic';
 let mode = 'train';
 let run;
 let timer;
+let roundEndMessage = '';
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -146,15 +147,56 @@ function fillSkills(value = 'all') {
     const name = t(...groupCopy[key]);
     const group = element('optgroup');
     group.label = name;
-    if (skills.length > 1) group.append(new Option(t(`Trộn ${name}`, `Mix ${name}`), `group:${key}`));
     const choices = key === 'distance' ? ['count-steps', 'find-by-steps'] : key === 'quartet' ? ['quartet-numbers', ...skills] : skills;
     for (const kind of choices) {
       const combined = combinedDrills[kind];
       group.append(new Option(combined ? t(...combined.label) : drillName(kind), kind));
     }
+    if (skills.length > 1) {
+      const mix = new Option(t(`Trộn ${name}`, `Mix ${name}`), `group:${key}`);
+      group.insertBefore(mix, key === 'relative' ? null : group.firstChild);
+    }
     selector.append(group);
   }
   selector.value = [...selector.options].some(option => option.value === value) ? value : 'all';
+}
+
+function trainerRoute(stage) {
+  if (view === 'learn') return `#learn/${studyStyle}`;
+  if (view === 'assistant') return '#assistant';
+  const skill = level === 'beyond' ? 'all' : $('skill').value || 'all';
+  return ['#practice', level, skill, mode, stage].filter(Boolean).join('/');
+}
+
+function navigateTrainer(stage, replace = false) {
+  const route = trainerRoute(stage);
+  if (route === location.hash) return;
+  const state = stage ? { trainerRound: true } : null;
+  if (replace) history.replaceState(state, '', route);
+  else history.pushState(state, '', route);
+}
+
+function readTrainerRoute() {
+  const [section, nextLevel, skill, nextMode] = location.hash.slice(1).split('/');
+  const leftRound = Boolean(run);
+  clearInterval(timer);
+  run = null;
+  $('trial-review').open = false;
+  view = section === 'assistant' || section === 'practice' ? section : 'learn';
+  if (view === 'practice') {
+    level = nextLevel === 'advanced' || nextLevel === 'beyond' ? nextLevel : 'basic';
+    mode = nextMode === 'trial' ? 'trial' : 'train';
+    if (level !== 'beyond') fillSkills(skill);
+  } else if (view === 'learn') {
+    studyStyle = nextLevel === 'grid' ? 'grid' : 'flip';
+  }
+  navigateTrainer(null, true);
+  renderSetup();
+  if (leftRound && view === 'practice') {
+    if (roundEndMessage) $('practice-status').textContent = roundEndMessage;
+    $('skill').focus();
+  }
+  roundEndMessage = '';
 }
 
 function renderSetup() {
@@ -184,7 +226,13 @@ function renderSetup() {
   $('focus-field').hidden = trial;
   if (!beyond) {
     const skills = currentSkills();
-    $('answer-mode-field').hidden = skills.every(skill => skill === 'restack');
+    const restackOnly = skills.every(skill => skill === 'restack');
+    $('answer-mode-field').hidden = trial && restackOnly;
+    $('choice-mode').hidden = $('choice-mode').disabled = restackOnly;
+    $('reveal-mode').hidden = $('reveal-mode').disabled = trial;
+    $('manual-mode').textContent = restackOnly ? t('Chạm để xếp', 'Tap to order') : t('Nhập trên màn hình', 'On-screen input');
+    const selector = $('answer-mode');
+    if (selector.selectedOptions[0]?.disabled) selector.value = 'manual';
     const count = skills.reduce((sum, kind) => sum + (progress?.[kind]?.total ?? 0), 0);
     $('practice-status').textContent = count ? t(`Đã trả lời ${count} câu ở các bài đã chọn.`, `${count} answers recorded for the selected drills.`) : '';
   }
@@ -232,11 +280,13 @@ function newRound(event) {
   }
   const requested = trial ? Number($('trial-count').value) : questions.length;
   const limit = Math.min(requested, questions.length);
-  run = { trial, questions, limit, index: 0, results: [], choice: $('answer-mode').value === 'choice', range: options,
+  const answerMode = $('answer-mode').value;
+  run = { trial, questions, limit, index: 0, results: [], choice: answerMode === 'choice', reveal: !trial && answerMode === 'reveal', range: options,
     started: performance.now(), count: 0 };
   $('trial-size-note').hidden = limit === requested;
   $('trial-size-note').textContent = t(`Bài đã chọn có ${limit} câu khác nhau. Lượt thi dùng toàn bộ số câu này.`,
     `The selected drills have ${limit} unique questions. This trial uses all of them.`);
+  navigateTrainer('session');
   renderSetup();
   showQuestion();
   if (trial) { tick(); timer = setInterval(tick, 200); }
@@ -401,8 +451,10 @@ function setupManual(prompt) {
 
 function showQuestion() {
   const prompt = run.questions[run.index];
-  const restack = prompt.kind === 'restack';
+  const isRestack = prompt.kind === 'restack';
+  const restack = isRestack && !run.reveal;
   run.answered = false;
+  run.revealedAt = null;
   run.restack = null;
   $('session-mode').textContent = run.trial ? t('Thi', 'Time Trial') : t('Tập', 'Trainer');
   $('question-count').textContent = run.trial ? `${run.count + 1} / ${run.limit}` : t(`Câu ${run.count + 1}`, `Question ${run.count + 1}`);
@@ -410,25 +462,31 @@ function showQuestion() {
   $('trial-progress').hidden = !run.trial;
   if (run.trial) { $('trial-progress').max = run.limit; $('trial-progress').value = run.count; }
   $('question-skill').textContent = drillName(prompt.kind);
-  $('question-text').textContent = promptText(prompt);
+  $('question-text').textContent = isRestack && run.reveal
+    ? t('Nhẩm thứ tự stack của các lá này từ trên xuống.', 'Recall the order of these cards from top to bottom.')
+    : promptText(prompt);
   $('question-cards').replaceChildren(...(restack ? [] : prompt.shown.map(cardFace)));
   $('question-cards').hidden = restack || !prompt.shown.length;
-  $('answer-form').hidden = false;
+  $('answer-form').hidden = run.reveal;
+  $('reveal-answer').hidden = !run.reveal;
+  $('self-grade').hidden = true;
   $('answer-choices').hidden = restack || !run.choice;
   $('answer-pad').hidden = restack || run.choice;
   $('restack-board').hidden = !restack;
   $('submit-answer').hidden = !restack && run.choice;
   $('next-question').hidden = true;
   $('feedback').hidden = true;
-  if (restack) setupRestack(prompt);
-  else if (run.choice) renderChoices(prompt);
-  else setupManual(prompt);
+  if (!run.reveal) {
+    if (restack) setupRestack(prompt);
+    else if (run.choice) renderChoices(prompt);
+    else setupManual(prompt);
+  }
   run.questionStarted = performance.now();
   $('question-text').focus({ preventScroll: true });
 }
 
 function feedback(prompt, right, skipped) {
-  const title = skipped ? t('Đã bỏ qua', 'Skipped') : right ? t('Đúng', 'Correct') : t('Sai', 'Incorrect');
+  const title = skipped ? t('Đã bỏ qua', 'Skipped') : right === null ? t('Đáp án', 'Answer') : right ? t('Đúng', 'Correct') : t('Sai', 'Incorrect');
   $('feedback').dataset.result = right === false ? 'wrong' : 'answer';
   $('feedback').textContent = `${title} · ${formatAnswer(prompt)}`;
   $('feedback').hidden = false;
@@ -439,7 +497,7 @@ function record(correct, values = [], skipped = false) {
   const prompt = run.questions[run.index];
   run.answered = true;
   run.count++;
-  const result = { prompt, correct, values, skipped, ms: performance.now() - run.questionStarted };
+  const result = { prompt, correct, values, skipped, ms: (run.revealedAt ?? performance.now()) - run.questionStarted };
   const trackedPrompt = run.restack && !correct && !skipped
     ? { ...prompt, focus: prompt.answer.filter((card, i) => card !== run.restack[i]) }
     : prompt;
@@ -450,12 +508,14 @@ function record(correct, values = [], skipped = false) {
       run.elapsed = performance.now() - run.started;
       run.finished = true;
       clearInterval(timer);
+      navigateTrainer('results', true);
       renderResults();
       $('back-to-practice').focus();
     } else advanceQuestion();
     return;
   }
   $('answer-form').hidden = true;
+  $('self-grade').hidden = true;
   feedback(prompt, correct, skipped);
   $('next-question').textContent = run.count === run.limit ? t('Kết thúc lượt', 'Finish session') : t('Câu tiếp theo', 'Next question');
   $('next-question').hidden = false;
@@ -465,8 +525,7 @@ function record(correct, values = [], skipped = false) {
 function advanceQuestion() {
   if (run.count >= run.limit) {
     const count = run.count;
-    exitRound();
-    $('practice-status').textContent = t(`Đã làm hết ${count} câu khác nhau trong lượt này.`, `You finished all ${count} unique questions in this session.`);
+    exitRound(t(`Đã làm hết ${count} câu khác nhau trong lượt này.`, `You finished all ${count} unique questions in this session.`));
     return;
   }
   run.index++;
@@ -501,12 +560,13 @@ function renderResults() {
   renderSetup();
 }
 
-function exitRound() {
+function exitRound(note = '') {
+  if (!run || run.exiting) return;
+  run.exiting = true;
+  roundEndMessage = note;
   clearInterval(timer);
-  run = null;
-  $('trial-review').open = false;
-  renderSetup();
-  $('skill').focus();
+  if (history.state?.trainerRound) history.back();
+  else readTrainerRoute();
 }
 
 $('language').addEventListener('click', () => {
@@ -515,14 +575,33 @@ $('language').addEventListener('click', () => {
   applyLanguage();
 });
 
-for (const button of all('[data-view]')) button.addEventListener('click', () => { view = button.dataset.view; renderSetup(); });
+window.addEventListener('hashchange', readTrainerRoute);
+for (const button of all('[data-view]')) button.addEventListener('click', () => {
+  view = button.dataset.view;
+  if (run) {
+    clearInterval(timer);
+    run = null;
+    $('trial-review').open = false;
+  }
+  navigateTrainer();
+  renderSetup();
+});
 for (const button of all('[data-level]')) button.addEventListener('click', () => {
   level = button.dataset.level;
   if (level !== 'beyond') fillSkills();
+  navigateTrainer();
   renderSetup();
 });
-for (const button of all('[data-mode]')) button.addEventListener('click', () => { mode = button.dataset.mode; renderSetup(); });
-for (const button of all('[data-learn]')) button.addEventListener('click', () => { studyStyle = button.dataset.learn; renderStudy(); });
+for (const button of all('[data-mode]')) button.addEventListener('click', () => {
+  mode = button.dataset.mode;
+  navigateTrainer();
+  renderSetup();
+});
+for (const button of all('[data-learn]')) button.addEventListener('click', () => {
+  studyStyle = button.dataset.learn;
+  navigateTrainer();
+  renderStudy();
+});
 for (const button of all('[data-range]')) button.addEventListener('click', () => changeRange(...button.dataset.range.split(',').map(Number)));
 for (const id of ['range-start', 'range-end']) $(id).addEventListener('change', () => { const { start, end } = range(); changeRange(start, end); });
 
@@ -556,18 +635,31 @@ $('flip-side').addEventListener('change', () => { flipped = false; renderStudy()
 $('flip-card').addEventListener('click', () => { flipped = !flipped; renderStudy(); });
 $('flip-prev').addEventListener('click', () => { studyIndex--; flipped = false; renderStudy(); });
 $('flip-next').addEventListener('click', () => { studyIndex++; flipped = false; renderStudy(); });
-for (const id of ['skill', 'practice-focus']) $(id).addEventListener('change', renderSetup);
+$('skill').addEventListener('change', () => { navigateTrainer(); renderSetup(); });
+$('practice-focus').addEventListener('change', renderSetup);
 $('practice-form').addEventListener('submit', newRound);
 $('answer-form').addEventListener('submit', event => {
   event.preventDefault();
   if (run?.restack) submitAnswer(run.restack);
-  else if (run && !run.choice) submitAnswer(manualValues(run.manual));
+  else if (run && !run.choice && !run.reveal) submitAnswer(manualValues(run.manual));
 });
 $('skip-answer').addEventListener('click', () => record(false, [], true));
+$('reveal-answer').addEventListener('click', () => {
+  if (!run?.reveal || run.revealedAt !== null) return;
+  run.revealedAt = performance.now();
+  feedback(run.questions[run.index], null, false);
+  $('reveal-answer').hidden = true;
+  $('self-grade').hidden = false;
+  $('mark-right').focus();
+});
+for (const [id, correct] of [['mark-right', true], ['mark-wrong', false]]) {
+  $(id).addEventListener('click', () => { if (run?.revealedAt != null) record(correct); });
+}
 $('next-question').addEventListener('click', advanceQuestion);
-$('quit-practice').addEventListener('click', exitRound);
-$('back-to-practice').addEventListener('click', exitRound);
+$('quit-practice').addEventListener('click', () => exitRound());
+$('back-to-practice').addEventListener('click', () => exitRound());
 
 applyLanguage();
 chooseStack();
+readTrainerRoute();
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('./offline.js').catch(() => {});

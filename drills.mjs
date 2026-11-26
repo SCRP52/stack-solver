@@ -2,11 +2,11 @@ import { cardCode, deckLength as size, cardLabel } from './stack-library.mjs';
 
 export const basic = ['card-position', 'position-card', 'previous', 'next'];
 export const advanced = {
+  relative: ['bottom-card', 'relative-position', 'bottom-position'],
   acaan: ['cut-count', 'cut-card'],
   quartet: ['quartet-positions', 'quartet-order', 'quartet-distances', 'relative-quartet', 'next-rank', 'previous-rank'],
   mate: ['mate-position', 'mate-distance', 'relative-mate'],
   distance: ['forward-distance', 'backward-distance', 'forward-offset', 'backward-offset'],
-  relative: ['relative-position', 'bottom-position', 'bottom-card'],
   missing: ['single-missing', 'multiple-missing'],
   restack: ['restack'],
 };

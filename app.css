@@ -7,14 +7,15 @@ button, summary { cursor: pointer; }
 button:disabled { opacity: .48; cursor: default; }
 a { color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.header { margin: auto; max-width: 1160px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px clamp(16px, 4vw, 35px); border-bottom: 1px solid var(--line); }
+.header { margin: auto; max-width: 1160px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px clamp(12px, 4vw, 35px); border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; text-decoration: none; white-space: nowrap; }
 .brand span { display: grid; place-items: center; width: 32px; height: 32px; background: var(--accent); color: var(--ink); border-radius: 7px; font-size: 21px; }
+.header-actions { display: flex; align-items: center; gap: 4px; }
+.language { min-width: 44px; }
 #history-count { margin-left: 4px; color: var(--accent); }
 main { max-width: 1160px; margin: auto; padding: 26px clamp(16px, 4vw, 35px) 54px; }
 .intro { margin: 0 0 23px; }
-.eyebrow { color: var(--accent); font-size: .8rem; font-weight: 720; letter-spacing: .045em; }
-h1 { margin: 3px 0 7px; font-size: clamp(2.15rem, 6vw, 4.25rem); letter-spacing: -.06em; line-height: 1.1; }
+h1 { margin: 3px 0 7px; font-size: clamp(1.75rem, 5.3vw, 3.5rem); letter-spacing: -.04em; line-height: 1.12; text-wrap: balance; }
 h2 { margin: 0 0 14px; font-size: 1.15rem; }
 p { margin: 0; }
 .intro > p:last-child, .muted, .hint { color: var(--subtle); }
@@ -34,14 +35,14 @@ textarea { resize: vertical; font-family: ui-monospace, monospace; line-height: 
 .quiet { background: transparent; color: inherit; }
 .quiet:hover, .secondary:hover { background: #2b392c; }
 .secondary { background: #222d23; border-color: var(--line); color: inherit; }
-.primary { background: var(--accent); color: var(--ink); flex: 1 1 auto; text-align: left; }
-.primary span { float: right; margin-left: 8px; }
+.primary { background: var(--accent); color: var(--ink); flex: 1 1 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
+.primary.stop { color: #ffe1d7; background: #423028; border-color: #704a3d; justify-content: center; }
 .submit-row { margin-top: 15px; }
 .settings { margin-top: 16px; border-block: 1px solid var(--line); padding-block: 8px; }
 summary { padding: 9px 0; font-weight: 700; }
 .options, .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 9px; }
-.options label { margin: 1px 0; display: flex; align-items: center; min-height: 40px; gap: 8px; }
-[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+.options label { margin: 1px 0; display: flex; align-items: center; min-height: 44px; gap: 8px; }
+[type=checkbox] { width: 18px; height: 18px; flex: 0 0 18px; accent-color: var(--accent); }
 .settings textarea { margin-bottom: 4px; }
 .error { color: #ffaea6; margin-top: 12px; font-size: .88rem; }
 .panel-title { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
@@ -50,13 +51,21 @@ summary { padding: 9px 0; font-weight: 700; }
 .result-message { color: var(--subtle); margin: 11px 0 3px; font-size: .93rem; line-height: 1.5; }
 progress { width: 100%; height: 7px; accent-color: var(--accent); margin: 13px 0 2px; }
 .metrics { display: flex; justify-content: space-between; gap: 9px; font-size: .77rem; color: var(--subtle); font-variant-numeric: tabular-nums; }
-#stop { margin-top: 11px; }
 .solution-top { display: flex; justify-content: space-between; align-items: center; margin: 17px 0 12px; }
 .move-total { font-size: 2rem; color: var(--accent); }
 .study { border: 1px solid var(--line); border-radius: 9px; padding: 8px; }
 .study-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; }
-.study-controls button { font-size: 1.25rem; min-width: 45px; }
-.step-detail { min-height: 2.2em; color: var(--subtle); font-size: .85rem; margin: 2px 5px 9px; }
+.study-controls button { font-size: 1.25rem; min-width: 48px; border-color: var(--line); }
+.step-detail { color: var(--subtle); font-size: .9rem; line-height: 1.5; margin: 8px 4px 10px; }
+.cut-guide { margin: 0 0 12px; padding: 12px; border-radius: 10px; background: #0e1710; border: 1px solid #384638; }
+.cut-guide h3 { margin: 0 0 7px; font-size: .82rem; font-weight: 720; color: var(--subtle); }
+.cut-guide ol { display: flex; flex-wrap: wrap; align-items: center; list-style: none; gap: 6px 8px; margin: 0; padding: 0; }
+.cut-gaps li { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 6px; background: #233024; border-radius: 6px; color: var(--accent); }
+.cut-gaps .card { min-width: 31px; font-size: .85rem; padding: 4px; }
+#packet-collect { margin-top: 12px; }
+.packet-order li { display: grid; gap: 3px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: .8rem; text-align: center; }
+.packet-order li:first-child { border-color: #738651; }
+.packet-order small { color: var(--subtle); }
 .cull-events { margin: 0 0 10px; padding-left: 25px; font-size: .86rem; color: var(--subtle); }
 .cull-events li { padding-block: 2px; }
 .deck-grid .goal-card { outline: 1px solid var(--accent); outline-offset: -1px; }
@@ -74,6 +83,18 @@ dialog::backdrop { background: #061008cc; }
 .history-list li button:first-child { flex: 1; text-align: left; min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 455px) {
   #start-preview { min-height: 12.5rem; }
+  .brand { font-size: .86rem; gap: 6px; }
+  .brand span { width: 26px; height: 26px; font-size: 17px; }
+  .header-actions button { padding-inline: 7px; font-size: .82rem; }
+}
+@media (max-width: 814px) {
+  main { padding-top: 19px; padding-bottom: calc(94px + env(safe-area-inset-bottom)); }
+  .intro { margin-bottom: 16px; }
+  .layout { gap: 12px; }
+  .panel { border-radius: 12px; }
+  .submit-row { position: fixed; bottom: 0; left: 0; right: 0; z-index: 2; margin: 0; padding: 9px max(12px, env(safe-area-inset-right)) calc(9px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: #101511; border-top: 1px solid var(--line); }
+  .submit-row button { min-height: 48px; }
+  .study { padding: 8px; }
 }
 @media (min-width: 815px) {
   main { padding-top: 39px; }

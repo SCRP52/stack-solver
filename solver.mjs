@@ -6,6 +6,8 @@ export const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q
 const cardsById = [...'SDCH'].flatMap(suit => (('SD'.includes(suit) ? ranks : [...ranks].reverse()).map(rank => rank + suit)));
 export const ndo = [...cardsById].reverse();
 const deckSize = cardsById.length;
+cardsById.push('JK');
+const catalogSize = cardsById.length;
 const base = 33;
 const ids = cardsById.map((_, i) => String.fromCharCode(base + i)).join('');
 const cardIds = new Map(cardsById.map((card, i) => [card, ids[i]]));
@@ -20,19 +22,20 @@ export const defaults = {
 
 export const mnemonica = '4C 2H 7D 3C 4H 6D AS 5H 9S 2S QH 3D QC 8H 6S 5S 9H KC 2D JH 3S 8S 6H 10C 5D KD 2C 3H 8D 5C KS JD 8C 10S KH JC 7S 10H AD 4S 7H 4D AC 9C JS QD 7C QS 10D 6C AH 9D';
 
-const normalizeCards = raw => raw.trim().toUpperCase().replace(/[♠♦♣♥]/g, suit => suits[suit]);
-const normalizeRank = card => card.replace(/^T([SDCH])$/, '10$1');
+const normalizeCards = raw => raw.trim().toUpperCase().replace(/[♠♦♣♥]/g, suit => suits[suit]).replace(/🃏/g, 'JK');
+const normalizeRank = card => card === 'JOKER' ? 'JK' : card.replace(/^T([SDCH])$/, '10$1');
+const validCard = (card, allowJoker) => cardIds.has(card) && (card !== 'JK' || allowJoker);
 
-export function parseCards(raw, size = deckSize) {
+export function parseCards(raw, size = deckSize, allowJoker = false) {
   const cards = normalizeCards(raw).split(/[\s,;|/]+/).filter(Boolean).map(normalizeRank);
-  const invalid = cards.find(card => !cardIds.has(card));
+  const invalid = cards.find(card => !validCard(card, allowJoker));
   if (invalid) throw new ConverterError('unknownCard', invalid);
   if (new Set(cards).size !== cards.length) throw new ConverterError('repeatCard');
   if (cards.length !== size) throw new ConverterError('deckSize', cards.length, size);
   return cards.map(card => cardIds.get(card)).join('');
 }
 
-export function parsePositions(raw, size = deckSize) {
+export function parsePositions(raw, size = deckSize, allowJoker = false) {
   const entries = normalizeCards(raw).replace(/\s*[:=]\s*/g, '=').split(/[\s,;]+/).filter(Boolean);
   if (!entries.length) throw new ConverterError('needPositions');
   const slots = new Set();
@@ -41,7 +44,8 @@ export function parsePositions(raw, size = deckSize) {
     const match = /^(\d+)=([A-Z0-9]+)$/.exec(entry);
     if (!match) throw new ConverterError('badPosition', entry);
     const position = Number(match[1]);
-    const card = cardIds.get(normalizeRank(match[2]));
+    const name = normalizeRank(match[2]);
+    const card = validCard(name, allowJoker) ? cardIds.get(name) : null;
     if (position < 1 || position > size) throw new ConverterError('positionRange', position, size);
     if (!card) throw new ConverterError('unknownCard', match[2]);
     if (slots.has(position) || cards.has(card)) throw new ConverterError('repeatPosition');
@@ -53,9 +57,9 @@ export function parsePositions(raw, size = deckSize) {
 
 export const displayCards = state => [...state].map(letter => cardsById[index(letter)]);
 export const newDeck = () => ndo.map(card => cardIds.get(card)).join('');
-export const cardCode = raw => {
+export const cardCode = (raw, allowJoker = false) => {
   const card = normalizeRank(normalizeCards(raw));
-  return cardIds.has(card) ? card : null;
+  return validCard(card, allowJoker) ? card : null;
 };
 
 function createSolver(size) {
@@ -378,7 +382,7 @@ function findDirectCull(start, target, config) {
   }
   if (!config.cull) return null;
 
-  const sourceSlots = new Uint8Array(deckSize);
+  const sourceSlots = new Uint8Array(catalogSize);
   for (let i = 0; i < size; i++) sourceSlots[index(start[i])] = i;
 
   function alongSpread(direction) {
@@ -461,7 +465,7 @@ function directExpandedMove(start, target, moves, allowCull = true) {
 }
 
 function finishingKey(start, target) {
-  const slots = new Uint8Array(deckSize);
+  const slots = new Uint8Array(catalogSize);
   for (let i = 0; i < size; i++) slots[index(start[i])] = i;
   let permutation = '';
   for (let i = 0; i < size; i++) permutation += ids[slots[index(target[i])]];
@@ -624,8 +628,8 @@ function searchPractical(start, target, required, moves, expired, offer, enough,
   if (!operations.some(move => move.kind !== 'cut')) return;
   function side(state, wanted, backward) {
     const root = { state, handling: 0, packetStreak: 0 };
-    const weights = Array.from({ length: size }, () => new Uint8Array(deckSize));
-    const nextCard = new Uint8Array(deckSize);
+    const weights = Array.from({ length: size }, () => new Uint8Array(catalogSize));
+    const nextCard = new Uint8Array(catalogSize);
     for (const [slot, card] of required ?? [...wanted].map((card, slot) => [slot, card])) {
       for (let at = Math.max(0, slot - 3); at <= Math.min(size - 1, slot + 3); at++) {
         weights[at][index(card)] = at === slot ? 12 : 4 - Math.abs(at - slot);
@@ -1293,7 +1297,7 @@ function solve(start, requested, options, limits, notify = () => {}, pattern) {
     const searching = () => !best || best.length > provedThrough + 1 || !enough(best.length + 1);
     if (searching()) {
       report('structured', provedThrough, checked, true);
-      const goalSlots = new Uint8Array(deckSize);
+      const goalSlots = new Uint8Array(catalogSize);
       for (let slot = 0; slot < size; slot++) goalSlots[index(target[slot])] = slot;
       const seeds = new Map();
       function suggestPackets(state, route) {

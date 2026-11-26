@@ -5,7 +5,7 @@ import { advanced, answerChoices, basic, buildQuestion, grade, questionSet, stac
 import { library, saveStack, stackOrder } from '../stack-library.mjs';
 import { readProgress, saveProgress, slowCards, summarize, weakCards } from '../trainer-progress.mjs';
 import { drillCopy } from '../trainer-copy.mjs';
-import { parseCards, parsePositions, solve } from '../solver.mjs';
+import { displayCards, parseCards, parsePositions, solve } from '../solver.mjs';
 
 function memoryStorage() {
   const records = new Map();
@@ -216,4 +216,20 @@ test('existing Converter solves full presets and partial packets', () => {
   assert.equal(step.deck[2], 'AS');
   assert.equal(step.deck[3], '2C');
   assert.equal(step.deck[5], 'KH');
+});
+
+test('Converter accepts an optional Joker in full and partial packet orders', () => {
+  assert.throws(() => parseCards('AS JK', 2), { code: 'unknownCard' });
+  assert.throws(() => parseCards('JK JOKER', 2, true), { code: 'repeatCard' });
+  const full = parseCards('AS 2S 🃏 10S KS', 5, true);
+  const goal = parseCards('JOKER 10S KS AS 2S', 5, true);
+  assert.deepEqual(displayCards(full), ['AS', '2S', 'JK', '10S', 'KS']);
+  const moved = solve(full, goal, { cut: true }, { seconds: 1 });
+  assert.equal(moved.steps.length, 1);
+  assert.deepEqual(moved.steps[0].deck, displayCards(goal));
+  const initial = parsePositions('1=AS 3=JK 5=KS', 5, true);
+  const target = parsePositions('1=🃏 3=KS 4=AS', 5, true);
+  const partial = solve(initial, target, { cut: true }, { seconds: 1 }, undefined, 5);
+  assert.equal(partial.steps.length, 1);
+  assert.equal(partial.steps[0].deck[0], 'JK');
 });

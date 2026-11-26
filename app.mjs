@@ -1,6 +1,6 @@
-import { cardCode, cullTimeline, defaults, parseCards, parsePositions, displayCards } from './solver.mjs';
+import { cardCode, cullTimeline, defaults, parseCards, parsePositions, displayCards, ranks } from './solver.mjs?v=32';
 import { languageKey, library, libraryKey, saveStack, stackOrder } from './stack-library.mjs';
-import { ConverterError, message } from './i18n.mjs';
+import { ConverterError, message } from './i18n.mjs?v=32';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'stack-solver-history-v1';
@@ -18,6 +18,9 @@ let currentRoute = 0;
 let stepButtons = [];
 let language = 'vi';
 let size = 52;
+let sameSuit = false;
+let packetJoker = false;
+const usesPacketGrid = () => size !== 52 || packetJoker;
 let presets = [];
 const getPreset = id => presets.find(preset => preset.id === id);
 const findPreset = cards => presets.find(preset => stackOrder(preset.cards) === stackOrder(cards));
@@ -96,8 +99,9 @@ function updateTargetMode() {
   const partial = $('target-mode').value === 'partial';
   $('full-target').hidden = partial;
   $('partial-target').hidden = !partial;
-  $('target-full-fields').hidden = size !== 52;
-  $('target-packet').hidden = size === 52;
+  $('target-full-fields').hidden = usesPacketGrid();
+  $('target-packet').hidden = !usesPacketGrid();
+  setCopy('positions-help', sameSuit ? 'rankPositionsHelp' : 'cardPositionsHelp');
   $('save-target-stack').hidden = partial;
   showError();
 }
@@ -105,8 +109,8 @@ function updateTargetMode() {
 function updateStart() {
   const preset = getPreset($('start').value);
   const custom = $('start').value === 'custom';
-  $('start-custom').hidden = !custom || size !== 52;
-  $('start-packet').hidden = !custom || size === 52;
+  $('start-custom').hidden = !custom || usesPacketGrid();
+  $('start-packet').hidden = !custom || !usesPacketGrid();
   $('start-pos-fields').hidden = $('start').value !== 'partial';
   $('start-preview').hidden = !preset;
   $('start-preview').value = preset?.cards.join(' ') ?? '';
@@ -114,7 +118,7 @@ function updateStart() {
 }
 
 function loadCards(cards, name) {
-  if (size === 52) {
+  if (!usesPacketGrid()) {
     $('target').value = cards.join(' ');
     $('target-preset').value = findPreset(cards)?.id ?? '';
   } else writeGrid('target-packet', cards);
@@ -130,7 +134,7 @@ function installPresetOptions() {
     const selected = select.value;
     select.replaceChildren();
     select.add(new Option(t(id === 'start' ? 'startPlaceholder' : 'targetPlaceholder'), ''));
-    for (const category of size === 52 ? ['Bộ mới', 'Stack', 'custom'] : []) {
+    for (const category of usesPacketGrid() ? [] : ['Bộ mới', 'Stack', 'custom']) {
       const group = document.createElement('optgroup');
       group.label = category === 'custom' ? 'Custom Stack' : t(category === 'Bộ mới' ? 'factoryStacks' : 'presets');
       for (const preset of presets.filter(entry => entry.category === category)) {
@@ -143,14 +147,14 @@ function installPresetOptions() {
       select.add(new Option(t('somePositions'), 'partial'));
     }
     select.value = [...select.options].some(option => option.value === selected) ? selected : '';
-    if (id === 'start' && size !== 52 && !select.value) select.value = 'custom';
+    if (id === 'start' && usesPacketGrid() && !select.value) select.value = 'custom';
   }
 }
 
 const presetName = preset => ['phoenix', 'stebbins'].includes(preset.id) ? t(preset.id) : preset.label;
 
 function saveLibraryStack(initial) {
-  if (size !== 52 || (initial ? $('start').value === 'partial' : $('target-mode').value === 'partial')) return;
+  if (usesPacketGrid() || (initial ? $('start').value === 'partial' : $('target-mode').value === 'partial')) return;
   try {
     const preset = getPreset($('start').value);
     const raw = initial ? (preset ? stackOrder(preset.cards) : $('start-custom').value) : $('target').value;
@@ -165,15 +169,29 @@ function saveLibraryStack(initial) {
   $('library-status').hidden = false;
 }
 
+function gridCard(raw) {
+  const token = raw.trim().toUpperCase();
+  if (packetJoker && token === 'X') return 'JK';
+  if (!sameSuit) return cardCode(token, packetJoker);
+  const rank = token === 'T' ? '10' : token;
+  if (ranks.includes(rank)) return rank;
+  const card = cardCode(token, packetJoker);
+  return card === 'JK' ? card : card?.slice(0, -1) ?? null;
+}
+
 function readGrid(id) {
-  const key = `${id}:${size}`;
-  if (!gridDrafts.has(key)) gridDrafts.set(key, Array(size).fill(''));
+  const baseKey = `${id}:${size}`;
+  const key = sameSuit ? `${baseKey}:ranks` : baseKey;
+  if (!gridDrafts.has(key)) {
+    const suitedDraft = sameSuit ? gridDrafts.get(baseKey) : null;
+    gridDrafts.set(key, Array.from({ length: size }, (_, i) => gridCard(suitedDraft?.[i] ?? '') ?? ''));
+  }
   return gridDrafts.get(key);
 }
 
 function writeGrid(id, cards) {
   const draft = readGrid(id);
-  draft.splice(0, size, ...Array.from({ length: size }, (_, i) => cards[i] ?? ''));
+  draft.splice(0, size, ...Array.from({ length: size }, (_, i) => gridCard(cards[i] ?? '') ?? cards[i] ?? ''));
   $(id).querySelectorAll('input').forEach((input, slot) => {
     input.value = draft[slot] ?? '';
     input.removeAttribute('aria-invalid');
@@ -183,7 +201,8 @@ function writeGrid(id, cards) {
 function renderGrids() {
   for (const id of gridNames) {
     const grid = $(id);
-    if (grid.childElementCount !== size) {
+    if (grid.childElementCount !== size || grid.dataset.ranks !== String(sameSuit)) {
+      grid.dataset.ranks = String(sameSuit);
       grid.replaceChildren(...readGrid(id).map((card, slot) => {
         const label = document.createElement('label');
         label.append(slot + 1);
@@ -203,9 +222,10 @@ function renderGrids() {
         }
         input.addEventListener('input', () => {
           const value = input.value.trim().toUpperCase();
-          const valid = cardCode(value);
+          const valid = gridCard(value);
           input.value = readGrid(id)[slot] = valid ?? value;
-          input.setAttribute('aria-invalid', String(Boolean(value && !valid && value.length >= 2 && value !== '10')));
+          const invalid = value && !valid && (sameSuit ? value !== '1' : value.length >= 2 && value !== '10');
+          input.setAttribute('aria-invalid', String(Boolean(invalid)));
           showError();
           if (valid) focusAt(slot + 1);
         });
@@ -213,7 +233,7 @@ function renderGrids() {
           if (event.key === 'Backspace' && !input.value && slot) { event.preventDefault(); focusAt(slot - 1); }
         });
         input.addEventListener('paste', event => {
-          const pasted = event.clipboardData.getData('text').trim().split(/[\s,;|/]+/).map(cardCode);
+          const pasted = event.clipboardData.getData('text').trim().split(/[\s,;|/]+/).map(gridCard);
           if (!pasted.length || pasted.some(card => !card)) return;
           event.preventDefault();
           pasted.slice(0, size - slot).forEach((card, i) => { readGrid(id)[slot + i] = card; });
@@ -234,14 +254,26 @@ function renderGrids() {
 function updateDeck() {
   const packet = $('deck-format').value === 'packet';
   $('packet-size-field').hidden = !packet;
+  $('packet-options').hidden = !packet;
+  const ranksOnly = packet && $('same-suit').checked;
+  const joker = packet && $('packet-joker').checked;
+  const limit = ranksOnly ? 13 : 52;
+  $('packet-size').max = limit;
+  $('packet-rank-help').hidden = !ranksOnly;
+  $('packet-joker-help').hidden = !joker;
   const next = packet ? Number($('packet-size').value) : 52;
-  if (!Number.isInteger(next) || next < 1 || next > 52) { showError(new ConverterError('packetSize')); return false; }
-  if (size !== next) {
+  if (!Number.isInteger(next) || next < 1 || next > limit) {
+    showError(new ConverterError(ranksOnly ? 'sameSuitSize' : 'packetSize'));
+    return false;
+  }
+  if (size !== next || sameSuit !== ranksOnly || packetJoker !== joker) {
     size = next;
+    sameSuit = ranksOnly;
+    packetJoker = joker;
     installPresetOptions();
     renderGrids();
   }
-  $('library-actions').hidden = size !== 52;
+  $('library-actions').hidden = usesPacketGrid();
   $('library-status').hidden = true;
   updateStart();
   updateTargetMode();
@@ -251,7 +283,7 @@ function updateDeck() {
 function reverseInput(side) {
   const starting = side === 'start';
   const partial = starting ? $('start').value === 'partial' : $('target-mode').value === 'partial';
-  if (partial || size !== 52) {
+  if (partial || usesPacketGrid()) {
     const id = `${side}-${partial ? 'positions' : 'packet'}`;
     if (starting && !partial) { $('start').value = 'custom'; updateStart(); }
     writeGrid(id, [...readGrid(id)].reverse());
@@ -271,10 +303,15 @@ function reverseInput(side) {
 }
 
 function parseGrid(id, partial) {
-  const cards = readGrid(id);
-  if (partial) return parsePositions(cards.map((card, slot) => card ? `${slot + 1}=${card}` : '').join(' '), size);
+  const cards = readGrid(id).map(value => {
+    if (!value) return '';
+    const card = gridCard(value);
+    if (!card) throw new ConverterError(sameSuit ? 'unknownRank' : 'unknownCard', value);
+    return sameSuit && card !== 'JK' ? `${card}S` : card;
+  });
+  if (partial) return parsePositions(cards.map((card, slot) => card ? `${slot + 1}=${card}` : '').join(' '), size, packetJoker);
   if (cards.some(card => !card)) throw new ConverterError('deckSize', cards.filter(Boolean).length, size);
-  return parseCards(cards.join(' '), size);
+  return parseCards(cards.join(' '), size, packetJoker);
 }
 
 function setLocked(locked) {
@@ -333,6 +370,8 @@ function moveName(step) {
 
 function cardText(card) {
   if (card === '?') return '?';
+  if (card === 'JK') return 'Joker';
+  if (session?.sameSuit) return card.slice(0, -1);
   return card.slice(0, -1) + suits[card.at(-1)];
 }
 
@@ -533,14 +572,18 @@ function restore(entry) {
   if (worker) return;
   session = { ...entry };
   const savedSize = entry.size ?? entry.startCards.length;
-  $('deck-format').value = savedSize === 52 ? 'full' : 'packet';
-  if (savedSize !== 52) $('packet-size').value = savedSize;
+  const savedPacket = savedSize !== 52 || entry.sameSuit || entry.packetJoker;
+  $('deck-format').value = savedPacket ? 'packet' : 'full';
+  if (savedPacket) $('packet-size').value = savedSize;
+  $('same-suit').checked = Boolean(entry.sameSuit);
+  $('packet-joker').checked = Boolean(entry.packetJoker);
   updateDeck();
-  $('start').value = entry.startPositions ? 'partial' : findPreset(entry.startCards)?.id ?? 'custom';
+  const preset = usesPacketGrid() ? null : findPreset(entry.startCards);
+  $('start').value = entry.startPositions ? 'partial' : preset?.id ?? 'custom';
   if (entry.startPositions) {
     const cards = new Map(entry.startPositions);
     writeGrid('start-positions', Array.from({ length: size }, (_, slot) => cards.get(slot) ?? ''));
-  } else if (size !== 52) writeGrid('start-packet', entry.startCards);
+  } else if (usesPacketGrid()) writeGrid('start-packet', entry.startCards);
   else $('start-custom').value = entry.startCards.join(' ');
   updateStart();
   $('target-mode').value = entry.targetPositions ? 'partial' : 'full';
@@ -605,10 +648,10 @@ $('solver-form').addEventListener('submit', event => {
     if (!$('start').value) throw new ConverterError('needSource');
     const startPreset = getPreset($('start').value);
     const startPartial = $('start').value === 'partial';
-    const start = startPartial ? parseGrid('start-positions', true) : size !== 52 ? parseGrid('start-packet', false)
+    const start = startPartial ? parseGrid('start-positions', true) : usesPacketGrid() ? parseGrid('start-packet', false)
       : parseCards(startPreset ? startPreset.cards.join(' ') : $('start-custom').value);
     const partial = $('target-mode').value === 'partial';
-    const target = partial ? parseGrid('target-positions', true) : size !== 52 ? parseGrid('target-packet', false) : parseCards($('target').value);
+    const target = partial ? parseGrid('target-positions', true) : usesPacketGrid() ? parseGrid('target-packet', false) : parseCards($('target').value);
     const options = { ...defaults };
     for (const family of families) options[family] = $(family).checked;
     for (const [id, key] of switches) options[key] = $(id).checked;
@@ -627,8 +670,11 @@ $('solver-form').addEventListener('submit', event => {
     const limits = { seconds, maxStates: memory <= 2 ? 85_000 : memory <= 4 ? 180_000 : 340_000 };
     const startPositions = startPartial ? start.map(([slot, card]) => [slot, displayCards(card)[0]]) : null;
     const provided = new Map(startPositions);
-    session = { key: JSON.stringify(size === 52 ? [start, target, options] : [start, target, options, size]), name: $('name').value.trim() || t('unnamed'),
-      size, startPositions, startCards: startPartial ? Array.from({ length: size }, (_, slot) => provided.get(slot) ?? '?') : displayCards(start),
+    const key = [start, target, options];
+    if (size !== 52 || sameSuit || packetJoker) key.push(size);
+    if (sameSuit || packetJoker) key.push(sameSuit, packetJoker);
+    session = { key: JSON.stringify(key), name: $('name').value.trim() || t('unnamed'),
+      size, sameSuit, packetJoker, startPositions, startCards: startPartial ? Array.from({ length: size }, (_, slot) => provided.get(slot) ?? '?') : displayCards(start),
       targetCards: partial ? null : displayCards(target),
       targetPositions: partial ? target.map(([slot, card]) => [slot, displayCards(card)[0]]) : null,
       options, rankVersion, steps: null, optimal: false, provedThrough: 0, elapsed: 0 };
@@ -642,7 +688,7 @@ $('solver-form').addEventListener('submit', event => {
     $('meter').value = 0;
     $('elapsed').textContent = '0:00';
     setCopy('proof', 'openProof');
-    worker = new Worker(new URL('./worker.mjs', import.meta.url), { type: 'module' });
+    worker = new Worker(new URL('./worker.mjs?v=32', import.meta.url), { type: 'module' });
     setLocked(true);
     if (matchMedia('(max-width: 814px)').matches) $('work').scrollIntoView({ block: 'start', behavior: 'smooth' });
     worker.onmessage = ({ data }) => {
@@ -686,6 +732,11 @@ window.addEventListener('storage', event => { if (event.key === libraryKey) inst
 window.addEventListener('pageshow', event => { if (event.persisted) installPresetOptions(); });
 $('deck-format').addEventListener('change', updateDeck);
 $('packet-size').addEventListener('change', updateDeck);
+$('same-suit').addEventListener('change', () => {
+  if ($('same-suit').checked && Number($('packet-size').value) > 13) $('packet-size').value = 13;
+  updateDeck();
+});
+$('packet-joker').addEventListener('change', updateDeck);
 $('reverse-start').addEventListener('click', () => reverseInput('start'));
 $('reverse-target').addEventListener('click', () => reverseInput('target'));
 $('language').addEventListener('click', () => {

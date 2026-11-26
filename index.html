@@ -37,6 +37,14 @@
             <input id="packet-size" data-lock type="number" min="1" max="52" value="13" inputmode="numeric">
           </div>
         </div>
+        <div id="packet-options" hidden>
+          <div class="options">
+            <label><input id="same-suit" type="checkbox" data-lock> <span data-en="Same Suit">Cùng chất</span></label>
+            <label><input id="packet-joker" type="checkbox" data-lock> <span data-en="Add Joker">Thêm Joker</span></label>
+          </div>
+          <p id="packet-rank-help" class="hint" hidden data-en="Enter ranks such as A, 10 or K. Up to 13 cards.">Nhập giá trị như A, 10 hoặc K. Tối đa 13 lá.</p>
+          <p id="packet-joker-help" class="hint" hidden data-en="Enter X for Joker. Joker takes one slot.">Nhập X cho Joker. Joker chiếm một ô.</p>
+        </div>
         <div class="stack-heading"><label for="start" data-en="Initial stack">Stack ban đầu</label><button type="button" class="quiet" id="reverse-start" data-lock data-en="Reverse order">Đảo thứ tự</button></div>
         <select id="start" data-lock>
           <option value="">Chọn stack ban đầu</option>
@@ -170,6 +178,6 @@
     <ul id="history-list" class="history-list"></ul>
     <p class="hint" data-en="Stacks and routes are stored in this browser.">Các stack và lời giải được lưu trong trình duyệt này.</p>
   </dialog>
-  <script type="module" src="./app.mjs"></script>
+  <script type="module" src="./app.mjs?v=32"></script>
 </body>
 </html>

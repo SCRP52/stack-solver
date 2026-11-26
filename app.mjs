@@ -223,6 +223,16 @@ function makeCard(card) {
   return element;
 }
 
+function cardReferences(text) {
+  return text.split(/((?:10|[2-9AJQK])[♠♣♥♦])/g).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const card = document.createElement('span');
+    card.className = /[♥♦]$/.test(part) ? 'card-reference red' : 'card-reference';
+    card.textContent = part;
+    return card;
+  });
+}
+
 function showCutGuide(guide) {
   $('cut-guide').hidden = !guide;
   if (!guide) return;
@@ -259,7 +269,7 @@ function showStep(number) {
   $('cull-events').hidden = !events.length;
   $('cull-events').replaceChildren(...events.map(description => {
     const item = document.createElement('li');
-    item.textContent = description;
+    item.append(...cardReferences(description));
     return item;
   }));
   $('previous').disabled = !number;
@@ -300,7 +310,9 @@ function renderSolution() {
     const number = document.createElement('span');
     number.className = 'number';
     number.textContent = index + 1;
-    button.append(number, document.createTextNode(moveName(step)));
+    const label = document.createElement('span');
+    label.append(...cardReferences(moveName(step)));
+    button.append(number, label);
     button.addEventListener('click', () => {
       showStep(index + 1);
       $('study').scrollIntoView({ block: 'nearest', behavior: 'smooth' });

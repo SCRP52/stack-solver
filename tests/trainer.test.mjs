@@ -112,13 +112,14 @@ test('Missing Card hides the range while the visible cards identify one unique s
   const model = stackModel(cards);
   const pool = questionSet(model, advanced.missing, { random: () => 0.99 });
   const givenCards = new Set();
-  assert.equal(pool.length, 44 * (5 + 10) + 2 * (6 + 15));
+  assert.equal(pool.length, 46 * (5 + 10));
   const segments = Array.from({ length: 46 }, (_, start) => cards.slice(start, start + 7));
   for (const { args, shown, answer } of pool) {
     assert.deepEqual(args, [answer.length]);
     const compatible = segments.filter(segment => shown.every(card => segment.includes(card)));
     assert.equal(compatible.length, 1);
     const [segment] = compatible;
+    assert.ok(shown.includes(segment[0]) && shown.includes(segment.at(-1)));
     assert.deepEqual([...shown, ...answer].sort(), [...segment].sort());
     assert.notDeepEqual(shown, segment.filter(card => !answer.includes(card)));
     givenCards.add([...shown].sort().join(' '));

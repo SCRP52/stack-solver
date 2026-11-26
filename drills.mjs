@@ -106,9 +106,13 @@ export function buildQuestion(model, skill, index, variant = 0, random = Math.ra
       const gaps = skill === 'single-missing' ? [variant] : missingPairs[variant];
       const missing = gaps.map(i => segment[i]);
       const visible = segment.filter((_, i) => !gaps.includes(i));
+      // The shown cards must identify a single window without a position hint.
+      const earliest = Math.max(0, slot(visible.at(-1)) - segmentSize + 1);
+      const latest = Math.min(size - segmentSize, slot(visible[0]));
+      if (earliest !== latest) return null;
       const shown = shuffle([...visible], random);
       if (shown.every((card, i) => card === visible[i])) shown.push(shown.shift());
-      return ask([start + 1, start + segment.length, missing.length], missing, missing, { unordered: true, shown });
+      return ask([missing.length], missing, missing, { unordered: true, shown });
     }
     default: throw new RangeError(`Unknown drill ${skill}`);
   }
@@ -145,7 +149,8 @@ export function questionSet(model, skills, { start = 1, end = size, random = Mat
       for (let variant = 0; variant < variants; variant++) {
         const prompt = buildQuestion(model, skill, index, variant, random);
         if (!prompt || !eligible(prompt)) continue;
-        const key = JSON.stringify([prompt.kind, prompt.args, missingVariants[skill] ? prompt.answer : prompt.shown]);
+        const shown = missingVariants[skill] ? [...prompt.shown].sort() : prompt.shown;
+        const key = JSON.stringify([prompt.kind, prompt.args, shown]);
         if (unique.has(key)) continue;
         unique.add(key);
         items.push(prompt);

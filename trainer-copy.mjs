@@ -21,8 +21,8 @@ export const drillCopy = {
   'relative-position': ['Vị trí sau khi cắt', 'Relative Position', 'Đáy hiện tại là {0}. {1} ở vị trí nào tính từ trên?', 'The current bottom card is {0}. Where is {1}, counting from the top?'],
   'bottom-position': ['Vị trí tính từ đáy', 'Bottom Position', 'Tính từ đáy stack, {0} là lá thứ mấy?', 'Counting from the bottom of the stack, where is {0}?'],
   'bottom-card': ['Lá tính từ đáy', 'Bottom Card', 'Lá thứ {0} tính từ đáy stack là lá nào?', 'Which card is at position {0} from the bottom?'],
-  'single-missing': ['Thiếu một lá', 'Single Missing', 'Các lá còn lại trong đoạn {0}–{1} đã được xáo. Thiếu lá nào?', 'The remaining cards from positions {0}–{1} are shuffled. Which card is missing?'],
-  'multiple-missing': ['Thiếu hai lá', 'Two Missing', 'Các lá còn lại trong đoạn {0}–{1} đã được xáo. Thiếu {2} lá nào?', 'The remaining cards from positions {0}–{1} are shuffled. Which {2} cards are missing?'],
+  'single-missing': ['Thiếu một lá', 'Single Missing', 'Thiếu lá nào?', 'Which card is missing?'],
+  'multiple-missing': ['Thiếu hai lá', 'Two Missing', 'Thiếu {0} lá nào?', 'Which {0} cards are missing?'],
 };
 
 export const groupCopy = {

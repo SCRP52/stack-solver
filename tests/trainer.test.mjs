@@ -107,16 +107,23 @@ test('every supported drill generates distinct prompts and grades the generated 
   }
 });
 
-test('Missing Card accepts either order and requires the full set of distinct answers', () => {
+test('Missing Card hides the range while the visible cards identify one unique segment', () => {
   const { cards } = presets[4];
   const model = stackModel(cards);
   const pool = questionSet(model, advanced.missing, { random: () => 0.99 });
-  assert.equal(pool.length, 46 * (7 + 21));
-  for (const { args: [start, end], shown, answer } of pool) {
-    const segment = cards.slice(start - 1, end);
+  const givenCards = new Set();
+  assert.equal(pool.length, 44 * (5 + 10) + 2 * (6 + 15));
+  const segments = Array.from({ length: 46 }, (_, start) => cards.slice(start, start + 7));
+  for (const { args, shown, answer } of pool) {
+    assert.deepEqual(args, [answer.length]);
+    const compatible = segments.filter(segment => shown.every(card => segment.includes(card)));
+    assert.equal(compatible.length, 1);
+    const [segment] = compatible;
     assert.deepEqual([...shown, ...answer].sort(), [...segment].sort());
     assert.notDeepEqual(shown, segment.filter(card => !answer.includes(card)));
+    givenCards.add([...shown].sort().join(' '));
   }
+  assert.equal(givenCards.size, pool.length);
   const q = buildQuestion(model, 'multiple-missing', 51, 6);
   assert.equal(grade(q, q.answer.slice().reverse()), true);
   assert.equal(grade(q, [q.answer[0], q.answer[0]]), false);

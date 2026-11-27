@@ -2,10 +2,13 @@ import { createStableCardGate } from './assistant-scan-logic.mjs?v=39';
 import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=41';
 import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
 import { choosePacketFace } from './assistant-packet.mjs?v=42';
-import { createScanLog } from './assistant-diagnostics.mjs?v=42';
+import { createScanLog } from './assistant-diagnostics.mjs?v=45';
+import { cameraScanRegion, isFullHd, previewScanRegion, requireFullHd } from './assistant-camera.mjs?v=45';
 
 const $ = id => document.getElementById(id);
 const capture = $('assistant-frame');
+const preview = $('assistant-preview');
+const guide = $('assistant-scan-guide');
 const ocrCrop = document.createElement('canvas');
 ocrCrop.width = 32;
 ocrCrop.height = 40;
@@ -27,6 +30,7 @@ let scanLog;
 let phaseKey;
 let lastFrameAt;
 let firstFrameSeen;
+let scanRegion;
 let ownedFullscreen;
 let originalThemeColor;
 const stableCardGate = createStableCardGate();
@@ -347,6 +351,14 @@ function updateStatus(vi, en) {
   if (status.textContent !== message) status.textContent = message;
 }
 
+function updateGuide() {
+  const { width, height } = preview.getBoundingClientRect();
+  if (!scanRegion || !width || !height) return;
+  const box = previewScanRegion(scanRegion, scanRegion.sourceWidth, scanRegion.sourceHeight, width, height);
+  for (const [name, value] of Object.entries(box)) guide.style[name] = `${value}px`;
+  guide.hidden = false;
+}
+
 async function requestWakeLock(session) {
   if (!navigator.wakeLock?.request) {
     scanLog?.event('screen.wake-lock', { result: 'unavailable' });
@@ -385,6 +397,9 @@ function stopTracks(reason) {
   stableCardGate.reset();
   lastVideoTime = -1;
   previousScanPixels.clear();
+  scanRegion = undefined;
+  guide.hidden = true;
+  guide.classList.remove('recognized');
   document.body.classList.remove('assistant-scanning');
   if (originalThemeColor !== undefined) document.querySelector('meta[name="theme-color"]').content = originalThemeColor;
   originalThemeColor = undefined;
@@ -423,13 +438,17 @@ function enterFullscreen(session, orientation) {
 function cameraError(session, stage, error) {
   if (session !== runNumber) return;
   const code = error.name ?? 'Error';
-  scanLog.event('camera.error', { stage, code });
+  scanLog.event('camera.error', { stage, code, constraint: error.constraint });
   stopTracks(code);
   const messages = {
     CameraUnavailable: ['Trình duyệt này không mở được camera. Hãy mở trang trực tiếp trong trình duyệt.', 'Camera access is unavailable. Open this page in your browser.'],
     NotAllowedError: ['Ứng dụng chưa có quyền dùng camera. Kiểm tra quyền camera rồi thử lại.', 'Camera permission was not granted. Check the permission and try again.'],
     NotReadableError: ['Camera đang bận hoặc không đọc được hình. Thử thoát app đang dùng camera.', 'The camera is busy or unable to deliver video. Close other apps using it and try again.'],
     NotFoundError: ['Không tìm thấy camera.', 'No camera was found.'],
+    OverconstrainedError: ['Trình duyệt không cấp được camera Full HD (1920 × 1080).',
+      'The browser could not provide a Full HD (1920 × 1080) camera stream.'],
+    CameraBelowFullHd: ['Hình từ camera thấp hơn Full HD (1920 × 1080). Xem nhật ký để biết độ phân giải thực tế.',
+      'The camera returned video below Full HD (1920 × 1080). See the scan log for its actual resolution.'],
     TrackEnded: ['Camera đã ngắt. Bấm Bắt đầu quét để kết nối lại.', 'The camera disconnected. Start scanning to reconnect.'],
   };
   const message = messages[code] ?? ['Không mở được hình từ camera. Bạn có thể tải nhật ký để kiểm tra.', 'Could not start camera video. Download the scan log to diagnose it.'];
@@ -444,6 +463,7 @@ async function start() {
   scanLog = createScanLog();
   scanLog.event('session.start', {
     orientation,
+    minimumResolution: '1920 × 1080',
     secureContext: window.isSecureContext,
     embedded: self !== top,
     viewport: [window.innerWidth, window.innerHeight],
@@ -476,24 +496,26 @@ async function start() {
       scanLog.event('camera.waiting-permission');
       updateStatus('Đang chờ quyền dùng camera', 'Waiting for camera permission');
     }, 6500);
-    const input = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } },
-    });
+    const input = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'user' } } });
     if (session !== runNumber) {
       for (const track of input.getTracks()) track.stop();
       return;
     }
     clearTimeout(pendingPermissionTimer);
     stream = input;
-    stage = 'playback';
     const track = input.getVideoTracks()[0];
     if (!track) {
       cameraError(session, stage, { name: 'NotFoundError' });
       return;
     }
-    const { width, height, frameRate, facingMode } = track.getSettings?.() ?? {};
-    scanLog.event('camera.opened', { width, height, frameRate, facingMode, muted: track.muted });
+    stage = 'resolution';
+    updateStatus('Đang đặt camera Full HD…', 'Setting the camera to Full HD…');
+    const nativeResize = navigator.mediaDevices.getSupportedConstraints?.().resizeMode;
+    await requireFullHd(track, nativeResize);
+    if (session !== runNumber) return;
+    const { width, height, frameRate, facingMode, resizeMode } = track.getSettings?.() ?? {};
+    scanLog.event('camera.opened', { width, height, frameRate, facingMode, resizeMode, muted: track.muted });
+    stage = 'playback';
     track.addEventListener('ended', () => cameraError(session, 'stream', { name: 'TrackEnded' }), { once: true });
     video.muted = true;
     video.playsInline = true;
@@ -523,44 +545,52 @@ function scanLoop() {
       video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
     lastFrameAt = now;
-    const scale = Math.min(1, 480 / Math.max(video.videoWidth, video.videoHeight));
-    const width = Math.max(1, Math.round(video.videoWidth * scale));
-    const height = Math.max(1, Math.round(video.videoHeight * scale));
-    if (!firstFrameSeen || capture.width !== width || capture.height !== height) {
+    const { videoWidth: width, videoHeight: height } = video;
+    if (scanRegion?.sourceWidth !== width || scanRegion?.sourceHeight !== height) {
+      const region = cameraScanRegion(width, height);
       scanLog?.event(firstFrameSeen ? 'video.resized' : 'video.first-frame', {
-        width: video.videoWidth, height: video.videoHeight, scanWidth: width, scanHeight: height,
+        width, height, scanWidth: region.scanSize, scanHeight: region.scanSize,
+        region: { x: region.x, y: region.y, size: region.size },
       });
       firstFrameSeen = true;
-      capture.width = width;
-      capture.height = height;
+      if (!isFullHd(width, height)) {
+        cameraError(runNumber, 'video-frame', { name: 'CameraBelowFullHd' });
+        return;
+      }
+      scanRegion = { ...region, sourceWidth: width, sourceHeight: height };
+      capture.width = capture.height = region.scanSize;
+      updateGuide();
       previousScanPixels.clear();
       stableCardGate.reset();
     }
     try {
       const ctx = capture.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(video, 0, 0, capture.width, capture.height);
+      const { x, y, size } = scanRegion;
+      ctx.drawImage(video, x, y, size, size, 0, 0, capture.width, capture.height);
       const { card: found, motion: stillness, paper, ambiguous, corners, candidates } = scanCardFrame(capture, previousScanPixels);
       const accepted = stableCardGate.update(found, stillness, now);
       const result = $('assistant-card-result');
       const name = accepted ? accepted.rank + suitSymbols[accepted.suit] : '';
       if (result.textContent !== name) result.textContent = name;
+      guide.classList.toggle('recognized', Boolean(accepted));
       const phase = accepted ? 'recognized' : ambiguous ? 'overlap' :
         !paper ? 'no-paper' : found ? 'settling' : !corners ? 'no-index' : 'unreadable-index';
       scanPhase(phase, { corners, candidates, card: accepted ? accepted.rank + accepted.suit : undefined });
       scanLog?.frame(phase, performance.now() - now);
       if (accepted) updateStatus('Đã nhận diện', 'Card recognized');
       else if (ambiguous) updateStatus('Ép vuông bộ bài để lộ một góc', 'Square the deck so only one corner is visible');
-      else if (!paper) updateStatus('Đưa cả số và chất ở góc bài vào khung hình', 'Bring both the corner rank and suit into view');
       else if (found) updateStatus('Giữ lá bài yên khoảng 0,2 giây', 'Hold the card still for about 0.2 seconds');
-      else updateStatus('Đọc hạng và chất ở góc bài', 'Reading rank and suit from the card corner');
+      else updateStatus('Đưa góc có số và chất vào khung', 'Place the rank and suit corner inside the box');
     } catch (error) {
       $('assistant-card-result').textContent = '';
+      guide.classList.remove('recognized');
       stableCardGate.reset();
       scanPhase('processing-error', { code: error.name });
       updateStatus('Không xử lý được khung hình', 'Could not process the camera frame');
     }
   } else if (now - lastFrameAt >= 1600) {
     $('assistant-card-result').textContent = '';
+    guide.classList.remove('recognized');
     stableCardGate.reset();
     scanPhase('no-frames', { readyState: video.readyState, paused: video.paused, trackMuted: stream?.getVideoTracks()[0]?.muted });
     updateStatus('Camera chưa gửi khung hình', 'Waiting for video frames from the camera');
@@ -584,6 +614,7 @@ function downloadLog() {
 $('assistant-start').addEventListener('click', start);
 $('assistant-stop').addEventListener('click', () => stopTracks('user'));
 $('assistant-log-download')?.addEventListener('click', downloadLog);
+new ResizeObserver(updateGuide).observe(preview);
 document.addEventListener('fullscreenchange', () => {
   if (!scanning || document.fullscreenElement || !ownedFullscreen) return;
   ownedFullscreen = false;

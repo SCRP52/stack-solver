@@ -4,8 +4,43 @@ import { agreeOnCard, createStableCardGate, meanPixelDifference } from '../assis
 import { cardRotation, findCardCorners } from '../assistant-corners.mjs';
 import { choosePacketFace, hasCoveringEdge } from '../assistant-packet.mjs';
 import { createScanLog } from '../assistant-diagnostics.mjs';
+import { cameraScanRegion, isFullHd, previewScanRegion, requireFullHd } from '../assistant-camera.mjs';
 
 const card = { rank: 'Q', suit: 'S' };
+
+test('requests native Full HD and retries only a transposed resolution', async () => {
+  const attempts = [];
+  const error = Object.assign(new Error('width'), { name: 'OverconstrainedError', constraint: 'width' });
+  const portraitCamera = { async applyConstraints(settings) {
+    attempts.push(settings);
+    if (attempts.length === 1) throw error;
+  } };
+  await requireFullHd(portraitCamera, true);
+  assert.deepEqual(attempts.map(settings => [settings.width.min, settings.height.min, settings.resizeMode.exact]),
+    [[1920, 1080, 'none'], [1080, 1920, 'none']]);
+
+  const refused = [];
+  await assert.rejects(requireFullHd({ async applyConstraints(settings) {
+    refused.push(settings);
+    throw error;
+  } }, false), { name: 'OverconstrainedError' });
+  assert.equal(refused.length, 2);
+  assert.ok(refused.every(settings => !('resizeMode' in settings)));
+  assert.equal(isFullHd(1920, 1080), true);
+  assert.equal(isFullHd(1080, 1920), true);
+  assert.equal(isFullHd(1080, 1440), false);
+  assert.equal(isFullHd(1920, 720), false);
+});
+
+test('the guide follows the native detail region on a preview with horizontal or vertical bars', () => {
+  const portrait = cameraScanRegion(1080, 1920);
+  assert.deepEqual(portrait, { x: 300, y: 720, size: 480, scanSize: 480 });
+  assert.deepEqual(previewScanRegion(portrait, 1080, 1920, 360, 480), { left: 120, top: 180, width: 120, height: 120 });
+  const landscape = cameraScanRegion(1920, 1080);
+  assert.deepEqual(landscape, { x: 720, y: 300, size: 480, scanSize: 480 });
+  assert.deepEqual(previewScanRegion(landscape, 1920, 1080, 480, 360), { left: 180, top: 120, width: 120, height: 120 });
+  assert.deepEqual(cameraScanRegion(3840, 2160), { x: 1440, y: 600, size: 960, scanSize: 540 });
+});
 
 function packetScene({ x, y, artwork = false } = {}) {
   const width = 165, height = 125;

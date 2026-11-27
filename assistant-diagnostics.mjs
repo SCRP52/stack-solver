@@ -1,4 +1,4 @@
-export const assistantBuild = '42';
+export const assistantBuild = '45';
 
 export function createScanLog({ now = () => Date.now(), maxEntries = 220 } = {}) {
   const started = now();

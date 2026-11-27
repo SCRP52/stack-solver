@@ -239,6 +239,11 @@
           </select>
           <button type="button" class="primary assistant-start" id="assistant-start" data-en="Start scanning">Bắt đầu quét</button>
           <p class="hint" id="assistant-camera-note" role="status" data-en="Allow camera access. Show a corner with both the rank and suit. Hold the card steady for about 0.2 seconds at a comfortable angle.">Cho phép dùng camera. Để lộ một góc có đủ số và chất, rồi giữ lá yên khoảng 0,2 giây ở góc cầm thuận tay.</p>
+          <details class="assistant-diagnostics">
+            <summary data-en="Scan diagnostics">Nhật ký quét</summary>
+            <p class="hint" data-en="Test a scan, tap Stop, then download the log. It contains diagnostics but no images.">Thử quét, bấm Dừng rồi tải nhật ký. File ghi lỗi và kết quả nhận diện, không có hình ảnh.</p>
+            <button type="button" id="assistant-log-download" class="secondary" disabled data-en="Download scan log">Tải nhật ký</button>
+          </details>
         </div>
         <div id="assistant-live" hidden>
           <video id="assistant-video" autoplay muted playsinline aria-hidden="true"></video>
@@ -250,7 +255,7 @@
       </section>
   </main>
   <script src="./vendor/ocrad/ocrad.js" defer></script>
-  <script type="module" src="./trainer.mjs?v=35"></script>
-  <script type="module" src="./assistant-scan.mjs?v=41"></script>
+  <script type="module" src="./trainer.mjs?v=42"></script>
+  <script type="module" src="./assistant-scan.mjs?v=42"></script>
 </body>
 </html>

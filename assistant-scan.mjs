@@ -1,6 +1,8 @@
 import { createStableCardGate } from './assistant-scan-logic.mjs?v=39';
 import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=41';
 import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
+import { choosePacketFace } from './assistant-packet.mjs?v=42';
+import { createScanLog } from './assistant-diagnostics.mjs?v=42';
 
 const $ = id => document.getElementById(id);
 const capture = $('assistant-frame');
@@ -19,6 +21,13 @@ const stretchedRanks = Object.fromEntries(ranks.map(rank => [
 let stream;
 let wakeLock;
 let frameTimer;
+let pendingPermissionTimer;
+let runNumber = 0;
+let scanLog;
+let phaseKey;
+let lastFrameAt;
+let firstFrameSeen;
+let ownedFullscreen;
 let originalThemeColor;
 const stableCardGate = createStableCardGate();
 const scanIntervalMs = 55;
@@ -249,19 +258,22 @@ function readCornerView(width, { rank, suit, rotation, leftEdge, rightEdge, uppe
   if (!bestSuit) return null;
 
   // Near a distinct left or right card edge, we know which way the index was printed.
-  let bestRank;
+  let bestRank, mirrored;
   const edgeDifference = leftEdge - rightEdge;
   if (Math.abs(edgeDifference) >= .28) {
-    bestRank = readRank(glyphMask(width, rank, rotation, edgeDifference > 0), rank);
+    mirrored = edgeDifference > 0;
+    bestRank = readRank(glyphMask(width, rank, rotation, mirrored), rank);
   } else {
     const normal = readRank(glyphMask(width, rank, rotation, false), rank);
-    const mirrored = readRank(glyphMask(width, rank, rotation, true), rank);
-    if (normal && mirrored && normal.label !== mirrored.label && Math.abs(normal.score - mirrored.score) < .1) return null;
-    bestRank = normal && (!mirrored || normal.score >= mirrored.score) ? normal : mirrored;
+    const flipped = readRank(glyphMask(width, rank, rotation, true), rank);
+    if (normal && flipped && normal.label !== flipped.label && Math.abs(normal.score - flipped.score) < .1) return null;
+    bestRank = normal && (!flipped || normal.score >= flipped.score) ? normal : flipped;
+    const even = normal && flipped && normal.label === flipped.label && Math.abs(normal.score - flipped.score) < .05;
+    mirrored = even ? null : bestRank === flipped;
   }
   if (!bestRank) return null;
   if ((sideEdge > .4 || (upperEdge > .6 && sideEdge > .15)) && (bestRank.score < .78 || bestSuit.score < .78)) return null;
-  return { rank: bestRank.label, suit: bestSuit.label, score: (bestRank.score + bestSuit.score) / 2 };
+  return { rank: bestRank.label, suit: bestSuit.label, score: (bestRank.score + bestSuit.score) / 2, mirrored };
 }
 
 function readCorner(width, corner) {
@@ -311,17 +323,21 @@ export function scanCardFrame(frame, history) {
   history.clear();
   history.set(width, gray);
 
-  let best = null;
+  const reads = [];
   for (const corner of corners) {
     const card = readCorner(width, corner);
     if (!card) continue;
     const score = corner.quality + card.score * .45;
-    if (!best || score > best.score) best = { card, corner, score };
+    reads.push({ card, corner: { ...corner, mirrored: card.mirrored }, score });
   }
+  const { best, ambiguous } = choosePacketFace(reads, { gray, width, height });
   return {
     card: best?.card ?? null,
     motion: best ? cornerMotion(previous, gray, frame, best.corner) : 0,
     paper,
+    ambiguous,
+    corners: corners.length,
+    candidates: reads.length,
   };
 }
 
@@ -331,19 +347,41 @@ function updateStatus(vi, en) {
   if (status.textContent !== message) status.textContent = message;
 }
 
-async function requestWakeLock() {
-  if (!('wakeLock' in navigator)) return false;
-  try { wakeLock = await navigator.wakeLock.request('screen'); return true; } catch { return false; }
+async function requestWakeLock(session) {
+  if (!navigator.wakeLock?.request) {
+    scanLog?.event('screen.wake-lock', { result: 'unavailable' });
+    return;
+  }
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (session !== runNumber) {
+      await lock.release();
+      return;
+    }
+    if (wakeLock) await wakeLock.release().catch(() => {});
+    wakeLock = lock;
+    scanLog.event('screen.wake-lock', { result: 'active' });
+  } catch (error) {
+    if (session === runNumber) scanLog?.event('screen.wake-lock', { result: error.name });
+  }
 }
 
-function stopTracks() {
+function stopTracks(reason) {
+  if (!scanning) return;
+  scanning = false;
+  runNumber++;
   clearTimeout(frameTimer);
-  frameTimer = undefined;
+  clearTimeout(pendingPermissionTimer);
+  scanLog?.flush();
+  scanLog?.event('session.stop', { reason, receivedFrames: firstFrameSeen });
   if (stream) for (const track of stream.getTracks()) track.stop();
   stream = undefined;
+  $('assistant-video').srcObject = null;
   if (wakeLock) wakeLock.release().catch(() => {});
   wakeLock = undefined;
-  scanning = false;
+  if (ownedFullscreen && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  ownedFullscreen = false;
+  try { screen.orientation?.unlock(); } catch {}
   stableCardGate.reset();
   lastVideoTime = -1;
   previousScanPixels.clear();
@@ -354,48 +392,127 @@ function stopTracks() {
   $('assistant-setup').hidden = false;
   $('assistant-card-result').textContent = '';
   $('assistant-start').disabled = false;
+  $('assistant-log-download').disabled = !scanLog;
+}
+
+function enterFullscreen(session, orientation) {
+  if (!document.documentElement.requestFullscreen) {
+    scanLog.event('screen.fullscreen', { result: 'unavailable' });
+    return;
+  }
+  const log = scanLog;
+  document.documentElement.requestFullscreen().then(async () => {
+    if (session !== runNumber) {
+      if (!scanning && document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      return;
+    }
+    ownedFullscreen = Boolean(document.fullscreenElement);
+    log.event('screen.fullscreen', { result: ownedFullscreen ? 'active' : 'inactive' });
+    if (!screen.orientation?.lock || !ownedFullscreen) return;
+    try {
+      await screen.orientation.lock(orientation);
+      if (session === runNumber) log.event('screen.orientation', { result: 'active', type: screen.orientation.type });
+    } catch (error) {
+      if (session === runNumber) log.event('screen.orientation', { result: error.name });
+    }
+  }).catch(error => {
+    if (session === runNumber) log.event('screen.fullscreen', { result: error.name });
+  });
+}
+
+function cameraError(session, stage, error) {
+  if (session !== runNumber) return;
+  const code = error.name ?? 'Error';
+  scanLog.event('camera.error', { stage, code });
+  stopTracks(code);
+  const messages = {
+    CameraUnavailable: ['Trình duyệt này không mở được camera. Hãy mở trang trực tiếp trong trình duyệt.', 'Camera access is unavailable. Open this page in your browser.'],
+    NotAllowedError: ['Ứng dụng chưa có quyền dùng camera. Kiểm tra quyền camera rồi thử lại.', 'Camera permission was not granted. Check the permission and try again.'],
+    NotReadableError: ['Camera đang bận hoặc không đọc được hình. Thử thoát app đang dùng camera.', 'The camera is busy or unable to deliver video. Close other apps using it and try again.'],
+    NotFoundError: ['Không tìm thấy camera.', 'No camera was found.'],
+    TrackEnded: ['Camera đã ngắt. Bấm Bắt đầu quét để kết nối lại.', 'The camera disconnected. Start scanning to reconnect.'],
+  };
+  const message = messages[code] ?? ['Không mở được hình từ camera. Bạn có thể tải nhật ký để kiểm tra.', 'Could not start camera video. Download the scan log to diagnose it.'];
+  $('assistant-camera-note').textContent = text(...message);
 }
 
 async function start() {
   if (scanning) return;
+  const session = ++runNumber;
+  const orientation = $('assistant-orientation').value;
+  const video = $('assistant-video');
+  scanLog = createScanLog();
+  scanLog.event('session.start', {
+    orientation,
+    secureContext: window.isSecureContext,
+    embedded: self !== top,
+    viewport: [window.innerWidth, window.innerHeight],
+    frameCallback: typeof video.requestVideoFrameCallback === 'function',
+  });
+  scanning = true;
+  phaseKey = '';
+  firstFrameSeen = false;
+  ownedFullscreen = false;
   $('assistant-start').disabled = true;
-  $('assistant-camera-note').textContent = text('Đang mở camera…', 'Opening camera…');
-  let fullscreenRequest;
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  originalThemeColor = themeColor.content;
+  themeColor.content = '#000000';
+  document.body.classList.add('assistant-scanning');
+  $('assistant-setup').hidden = true;
+  $('assistant-live').hidden = false;
+  $('assistant-card-result').textContent = '';
+  $('assistant-camera-note').textContent = '';
+  updateStatus('Đang mở camera…', 'Opening camera…');
+  if (!navigator.mediaDevices?.getUserMedia) {
+    cameraError(session, 'permission', { name: 'CameraUnavailable' });
+    return;
+  }
+
+  let stage = 'permission';
   try {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('cameraUnavailable');
-    const orientation = $('assistant-orientation').value;
-    fullscreenRequest = document.documentElement.requestFullscreen?.();
-    stream = await navigator.mediaDevices.getUserMedia({
+    enterFullscreen(session, orientation);
+    pendingPermissionTimer = setTimeout(() => {
+      if (session !== runNumber || stream) return;
+      scanLog.event('camera.waiting-permission');
+      updateStatus('Đang chờ quyền dùng camera', 'Waiting for camera permission');
+    }, 6500);
+    const input = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } },
     });
-    const video = $('assistant-video');
-    video.srcObject = stream;
-    await video.play();
-    if (fullscreenRequest) await fullscreenRequest.catch(() => {});
-    try { await screen.orientation?.lock(orientation); } catch {}
-    const screenHeld = await requestWakeLock();
-    scanning = true;
-    document.body.classList.add('assistant-scanning');
-    const themeColor = document.querySelector('meta[name="theme-color"]');
-    originalThemeColor = themeColor.content;
-    themeColor.content = '#000000';
-    $('assistant-setup').hidden = true;
-    $('assistant-live').hidden = false;
-    $('assistant-card-result').textContent = '';
-    updateStatus(screenHeld ? 'Đang quét góc bài' : 'Đang quét · máy chưa hỗ trợ khóa màn hình', screenHeld ? 'Scanning card corner' : 'Scanning · screen wake lock unavailable');
+    if (session !== runNumber) {
+      for (const track of input.getTracks()) track.stop();
+      return;
+    }
+    clearTimeout(pendingPermissionTimer);
+    stream = input;
+    stage = 'playback';
+    const track = input.getVideoTracks()[0];
+    if (!track) {
+      cameraError(session, stage, { name: 'NotFoundError' });
+      return;
+    }
+    const { width, height, frameRate, facingMode } = track.getSettings?.() ?? {};
+    scanLog.event('camera.opened', { width, height, frameRate, facingMode, muted: track.muted });
+    track.addEventListener('ended', () => cameraError(session, 'stream', { name: 'TrackEnded' }), { once: true });
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = input;
+    lastFrameAt = performance.now();
     scanLoop();
+    void requestWakeLock(session);
+    await video.play();
+    if (session === runNumber) scanLog.event('video.playing', { readyState: video.readyState });
   } catch (error) {
-    if (fullscreenRequest) await fullscreenRequest.catch(() => {});
-    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-    try { screen.orientation?.unlock(); } catch {}
-    if (stream) for (const track of stream.getTracks()) track.stop();
-    stream = undefined;
-    $('assistant-start').disabled = false;
-    const vi = error.message === 'cameraUnavailable' ? 'Máy không hỗ trợ camera trong trình duyệt này.' : 'Không mở được camera. Hãy cấp quyền rồi thử lại.';
-    const en = error.message === 'cameraUnavailable' ? 'This browser does not support camera access.' : 'Could not open the camera. Allow camera access and try again.';
-    $('assistant-camera-note').textContent = text(vi, en);
+    cameraError(session, stage, error);
   }
+}
+
+function scanPhase(phase, details = {}) {
+  const key = phase + (details.card ?? '');
+  if (key === phaseKey) return;
+  phaseKey = key;
+  scanLog?.event('scan.phase', { phase, ...details });
 }
 
 function scanLoop() {
@@ -405,45 +522,79 @@ function scanLoop() {
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0 &&
       video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
+    lastFrameAt = now;
     const scale = Math.min(1, 480 / Math.max(video.videoWidth, video.videoHeight));
     const width = Math.max(1, Math.round(video.videoWidth * scale));
     const height = Math.max(1, Math.round(video.videoHeight * scale));
-    if (capture.width !== width || capture.height !== height) {
+    if (!firstFrameSeen || capture.width !== width || capture.height !== height) {
+      scanLog?.event(firstFrameSeen ? 'video.resized' : 'video.first-frame', {
+        width: video.videoWidth, height: video.videoHeight, scanWidth: width, scanHeight: height,
+      });
+      firstFrameSeen = true;
       capture.width = width;
       capture.height = height;
       previousScanPixels.clear();
       stableCardGate.reset();
     }
-    const ctx = capture.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(video, 0, 0, capture.width, capture.height);
-    const { card: found, motion: stillness, paper } = scanCardFrame(capture, previousScanPixels);
-    const accepted = stableCardGate.update(found, stillness, now);
-    const result = $('assistant-card-result');
-    const name = accepted ? `${accepted.rank}${suitSymbols[accepted.suit]}` : '';
-    if (result.textContent !== name) result.textContent = name;
-    if (accepted) {
-      updateStatus('Đã nhận diện', 'Card recognized');
-    } else {
-      if (!paper) updateStatus('Đưa cả số và chất ở góc bài vào khung hình', 'Bring both the corner rank and suit into view');
-      else if (stillness > 7 || found) updateStatus('Giữ lá bài yên khoảng 0,2 giây', 'Hold the card still for about 0.2 seconds');
+    try {
+      const ctx = capture.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, capture.width, capture.height);
+      const { card: found, motion: stillness, paper, ambiguous, corners, candidates } = scanCardFrame(capture, previousScanPixels);
+      const accepted = stableCardGate.update(found, stillness, now);
+      const result = $('assistant-card-result');
+      const name = accepted ? accepted.rank + suitSymbols[accepted.suit] : '';
+      if (result.textContent !== name) result.textContent = name;
+      const phase = accepted ? 'recognized' : ambiguous ? 'overlap' :
+        !paper ? 'no-paper' : found ? 'settling' : !corners ? 'no-index' : 'unreadable-index';
+      scanPhase(phase, { corners, candidates, card: accepted ? accepted.rank + accepted.suit : undefined });
+      scanLog?.frame(phase, performance.now() - now);
+      if (accepted) updateStatus('Đã nhận diện', 'Card recognized');
+      else if (ambiguous) updateStatus('Ép vuông bộ bài để lộ một góc', 'Square the deck so only one corner is visible');
+      else if (!paper) updateStatus('Đưa cả số và chất ở góc bài vào khung hình', 'Bring both the corner rank and suit into view');
+      else if (found) updateStatus('Giữ lá bài yên khoảng 0,2 giây', 'Hold the card still for about 0.2 seconds');
       else updateStatus('Đọc hạng và chất ở góc bài', 'Reading rank and suit from the card corner');
+    } catch (error) {
+      $('assistant-card-result').textContent = '';
+      stableCardGate.reset();
+      scanPhase('processing-error', { code: error.name });
+      updateStatus('Không xử lý được khung hình', 'Could not process the camera frame');
     }
+  } else if (now - lastFrameAt >= 1600) {
+    $('assistant-card-result').textContent = '';
+    stableCardGate.reset();
+    scanPhase('no-frames', { readyState: video.readyState, paused: video.paused, trackMuted: stream?.getVideoTracks()[0]?.muted });
+    updateStatus('Camera chưa gửi khung hình', 'Waiting for video frames from the camera');
   }
   frameTimer = setTimeout(scanLoop, Math.max(0, scanIntervalMs - (performance.now() - now)));
 }
 
+function downloadLog() {
+  if (!scanLog) return;
+  const contents = scanLog.serialize();
+  const url = URL.createObjectURL(new Blob([contents], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'thisdeck-assistant-log-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 $('assistant-start').addEventListener('click', start);
-$('assistant-stop').addEventListener('click', () => {
-  stopTracks();
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  try { screen.orientation?.unlock(); } catch {}
+$('assistant-stop').addEventListener('click', () => stopTracks('user'));
+$('assistant-log-download')?.addEventListener('click', downloadLog);
+document.addEventListener('fullscreenchange', () => {
+  if (!scanning || document.fullscreenElement || !ownedFullscreen) return;
+  ownedFullscreen = false;
+  scanLog?.event('screen.fullscreen-exit');
+  if (firstFrameSeen) stopTracks('fullscreen-exit');
 });
-document.addEventListener('fullscreenchange', () => { if (scanning && !document.fullscreenElement) stopTracks(); });
-document.addEventListener('visibilitychange', async () => {
-  if (!scanning || document.visibilityState !== 'visible') return;
-  if (wakeLock) wakeLock.release().catch(() => {});
-  wakeLock = undefined;
-  await requestWakeLock();
+document.addEventListener('visibilitychange', () => {
+  if (!scanning) return;
+  scanLog?.event('screen.visibility', { state: document.visibilityState });
+  if (document.visibilityState === 'visible' && stream) void requestWakeLock(runNumber);
 });
-window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#assistant')) stopTracks(); });
+window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#assistant')) stopTracks('navigation'); });
+window.addEventListener('pagehide', () => stopTracks('pagehide'));
 

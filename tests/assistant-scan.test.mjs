@@ -1,9 +1,70 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { agreeOnCard, createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
-import { findCardCorners } from '../assistant-corners.mjs';
+import { cardRotation, findCardCorners } from '../assistant-corners.mjs';
+import { choosePacketFace, hasCoveringEdge } from '../assistant-packet.mjs';
+import { createScanLog } from '../assistant-diagnostics.mjs';
 
 const card = { rank: 'Q', suit: 'S' };
+
+function packetScene({ x, y, artwork = false } = {}) {
+  const width = 165, height = 125;
+  const gray = new Uint8Array(width * height).fill(218);
+  if (x !== undefined) for (let row = artwork ? 36 : 10; row < 112; row++) gray[row * width + x] = 156;
+  if (y !== undefined) for (let column = artwork ? 74 : 18; column < 135; column++) gray[y * width + column] = 156;
+  return { gray, width, height };
+}
+
+function packetIndex(x, y, mirrored = false) {
+  return {
+    rank: { x, right: x + 10, y, bottom: y + 19, h: 20 },
+    suit: { x: x + 1, right: x + 9, y: y + 24, bottom: y + 34 },
+    rotation: cardRotation(0),
+    mirrored,
+  };
+}
+
+test('a layer edge suppresses the rear card even when its index has the highest score', () => {
+  const rear = { card, corner: packetIndex(40, 25), score: .9 };
+  const bottom = { card: { rank: '6', suit: 'D' }, corner: packetIndex(64, 26), score: .8 };
+  const frame = packetScene({ x: 57 });
+  assert.equal(hasCoveringEdge(frame, rear.corner), true);
+  assert.equal(hasCoveringEdge(frame, bottom.corner), false);
+  assert.equal(choosePacketFace([rear, bottom], frame).best, bottom);
+  assert.deepEqual(choosePacketFace([rear], frame), { best: null, ambiguous: true });
+});
+
+test('detects a horizontal layer edge and the reflected edge, while ignoring short artwork lines', () => {
+  assert.equal(hasCoveringEdge(packetScene({ y: 66 }), packetIndex(40, 25)), true);
+  assert.equal(hasCoveringEdge(packetScene({ x: 56 }), packetIndex(61, 25, true)), true);
+  assert.equal(hasCoveringEdge(packetScene({ x: 57, artwork: true }), packetIndex(40, 25)), false);
+});
+
+test('holds ambiguous adjacent ranks blank and accepts an isolated or repeated read', () => {
+  const read = { card, corner: packetIndex(40, 25), score: .9 };
+  const nearby = { card: { rank: '6', suit: 'D' }, corner: packetIndex(63, 26), score: .75 };
+  const frame = packetScene();
+  assert.deepEqual(choosePacketFace([read, nearby], frame), { best: null, ambiguous: true });
+  assert.equal(choosePacketFace([read, { ...nearby, card }], frame).best, read);
+  assert.equal(choosePacketFace([read], frame).best, read);
+});
+
+test('diagnostic export keeps startup and aggregates scan results in a bounded JSON file', () => {
+  let time = 0;
+  const log = createScanLog({ now: () => time, maxEntries: 3 });
+  log.event('session.start', { orientation: 'portrait' });
+  log.event('camera.opened', { width: 640 });
+  log.frame('no-index', 10);
+  time = 1234;
+  log.frame('recognized', 30);
+  log.event('session.stop', { reason: 'user' });
+  const file = JSON.parse(log.serialize());
+  assert.equal(file.entries[0].event, 'session.start');
+  assert.equal(file.discardedEntries, 1);
+  const summary = file.entries.find(entry => entry.event === 'scan.summary');
+  assert.deepEqual(summary.outcomes, { 'no-index': 1, recognized: 1 });
+  assert.equal(summary.averageProcessingMs, 20);
+});
 
 function cornerFrame({ x = 30, y = 30, brightness = 225, mirrored = false, covered = false, ten = false } = {}) {
   const width = 180, height = 140, data = new Uint8ClampedArray(width * height * 4);

@@ -9,6 +9,7 @@ export const beyond = {
   knowledge: ['color-count', 'suit-count', 'suit-distribution', 'value-sum'],
   poker: ['poker-hand'],
   straight: ['specific-straight'],
+  'undo-influence': ['twice-as-hard'],
 };
 
 export const splitDefaults = { 2: [26, 26], 3: [18, 17, 17], 4: [13, 13, 13, 13], 5: [11, 11, 10, 10, 10] };
@@ -51,6 +52,20 @@ function scramble(values, random) {
 }
 
 const question = (kind, args, answer, focus, shown = [], extra = {}) => ({ kind, args, answer, focus, shown, unordered: false, ...extra });
+
+function twiceAsHardQuestions(model) {
+  const questions = [];
+  // Leave one possible selection cut strictly between A and B and one below B.
+  for (let low = 2; low <= deckLength - 3; low++) {
+    for (let high = low + 2; high < deckLength; high++) {
+      const a = deckLength - high;
+      const b = a + low;
+      const answer = [model.at(a - 1), model.at(b - 1)];
+      questions.push(question('twice-as-hard', [low, high], answer, answer, [], { entryLabels: ['A', 'B'] }));
+    }
+  }
+  return questions;
+}
 
 function makeQuestion(model, kind, index, { random, piles, first, last, hand }) {
   const { cards, slot, at } = model;
@@ -114,6 +129,10 @@ export function beyondQuestions(model, skills, { sequential = false, eligible = 
   piles = splitDefaults[4], first = 1, last = 13, hand = 'all' } = {}) {
   const options = { random, piles, first, last, hand };
   const buckets = skills.map(kind => {
+    if (kind === 'twice-as-hard') {
+      const questions = twiceAsHardQuestions(model).filter(eligible);
+      return sequential ? questions : shuffled(questions, random);
+    }
     const unique = new Set();
     const count = kind.endsWith('-full') ? 1 : kind === 'recall-progressive' ? 72 : beyond.knowledge.includes(kind) ? deckLength * 3
       : kind === 'poker-hand' && hand === 'all' ? deckLength * Object.keys(hands).length

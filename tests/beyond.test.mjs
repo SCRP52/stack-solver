@@ -200,6 +200,28 @@ test('Split defaults and unequal custom boundaries work for 2 through 5 piles', 
   }
 });
 
+test('Twice as Hard calculates ordered cut markers on the selected stack for every eligible number pair', () => {
+  for (const { cards } of presets) {
+    const questions = beyondQuestions(stackModel(cards), ['twice-as-hard'], { sequential: true });
+    assert.equal(questions.length, 1176);
+    assert.equal(new Set(questions.map(q => q.args.join())).size, questions.length);
+    assert.deepEqual(questions.find(q => q.args.join() === '18,43').answer, [cards[8], cards[26]]);
+    for (const q of questions) {
+      const [low, high] = q.args;
+      const [a, b] = q.answer.map(card => cards.indexOf(card) + 1);
+      assert.ok(a >= 1 && a + 1 < b && b < 51);
+      const reordered = [...cards.slice(a, b), ...cards.slice(b), ...cards.slice(0, a)];
+      assert.equal(reordered[low - 1], q.answer[1]);
+      assert.equal(reordered[high - 1], cards[51]);
+      assert.equal(grade(q, q.answer), true);
+      assert.equal(grade(q, [...q.answer].reverse()), false);
+    }
+    const mixed = beyondQuestions(stackModel(cards), ['twice-as-hard'], { random: seeded(51) });
+    assert.notDeepEqual(mixed.slice(0, 52).map(q => q.args), questions.slice(0, 52).map(q => q.args));
+    assert.equal(answerChoices(mixed[0], cards, {}, seeded(12)).filter(entry => grade(mixed[0], entry)).length, 1);
+  }
+});
+
 test('Stack CSV round-trips names and position order and rejects ambiguous decks', () => {
   const cards = [...presets[0].cards].reverse();
   for (const label of ['Stack "Ca phe", 2026', '=Formula', "'My Stack"]) {

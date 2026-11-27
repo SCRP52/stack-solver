@@ -3,6 +3,7 @@ import { suits } from './stack-library.mjs';
 export const beyondGroups = {
   recall: ['Recall', 'Recall'], split: ['Split', 'Split'], relations: ['Quan hệ màu và chất', 'Color & Suit Relations'],
   knowledge: ['Thông tin stack', 'Stack Knowledge'], poker: ['Poker Hand', 'Poker Hand'], straight: ['Sảnh cụ thể', 'Specific Straight'],
+  'undo-influence': ['UnDo Influence', 'UnDo Influence'],
 };
 
 const sameSuit = ['cùng chất', 'of the same suit'];
@@ -41,6 +42,8 @@ export const beyondDrills = {
   'value-sum': ['Tổng giá trị', 'Value Sum'],
   'poker-hand': ['Tìm tay bài', 'Find a Poker Hand'],
   'specific-straight': ['Tìm sảnh chỉ định', 'Find a Specific Straight'],
+  'twice-as-hard': ['Twice as Hard', 'Twice as Hard', '{0} và {1}. Cắt ngay dưới hai lá nào? Nhập A rồi B từ trên xuống.',
+    '{0} and {1}. Which two cards mark the cuts? Enter A then B, from top to bottom.'],
 };
 
 export const handNames = { pair: 'One Pair', 'two-pair': 'Two Pair', three: 'Three of a Kind', straight: 'Straight', flush: 'Flush',
@@ -53,6 +56,8 @@ export const beyondDetails = {
   knowledge: ['Đếm màu, chất hoặc tổng giá trị ở phía trên, phía dưới hoặc giữa các lá đã cho. A = 1, J = 11, Q = 12, K = 13.', 'Count colors, suits, or total ranks above, below or between the given cards. A = 1, J = 11, Q = 12, K = 13.'],
   poker: ['Biết lá đáy sau khi cắt rồi chọn vị trí tạo thành tay bài. Có thể chọn 52 ngoài vùng, rồi chọn thêm 51. Pair, Two Pair, Three và Four chỉ cần các lá cùng giá trị đủ để tạo cụm.', 'Use the new bottom card to locate the hand. You can use 52 outside the range, then add 51. Pair, Two Pair, Three and Four only require the cards that form the group.'],
   straight: ['Tìm đúng năm giá trị của sảnh đã cho sau khi cắt. Át có thể đứng đầu A–5 hoặc cuối 10–A. Có thể chọn 52 ngoài vùng, rồi chọn thêm 51.', 'Find the five ranks specified after a cut. Ace can start A–5 or end 10–A. You can use 52 outside the range, then add 51.'],
+  'undo-influence': ['Từ hai vị trí đích, nhẩm hai lá mốc A và B trên stack gốc theo cách tính ba tụ của Simon Aronson.',
+    'Use two target positions to recall cut markers A and B in the original stack, based on Simon Aronson’s three-packet calculation.'],
 };
 
 export function specialBeyondPrompt(question, language) {

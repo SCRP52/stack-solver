@@ -2,8 +2,8 @@ import { alignedCornerMotion, cardCornerPose, createStableCardGate } from './ass
 import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=41';
 import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
 import { choosePacketFace } from './assistant-packet.mjs?v=42';
-import { createScanLog } from './assistant-diagnostics.mjs?v=46';
-import { cameraScanRegion, isFullHd, previewScanRegion, requireFullHd } from './assistant-camera.mjs?v=46';
+import { createScanLog } from './assistant-diagnostics.mjs?v=47';
+import { cameraScanSize, isFullHd, previewFrameBounds, requireFullHd } from './assistant-camera.mjs?v=47';
 
 const $ = id => document.getElementById(id);
 const capture = $('assistant-frame');
@@ -30,10 +30,10 @@ let scanLog;
 let phaseKey;
 let lastFrameAt;
 let firstFrameSeen;
-let scanRegion;
+let videoSize;
 let ownedFullscreen;
 let originalThemeColor;
-const stableCardGate = createStableCardGate({ maxMotion: 22 });
+const stableCardGate = createStableCardGate({ maxMotion: 22, maxGap: 320 });
 const scanIntervalMs = 55;
 let lastVideoTime = -1;
 let scanning = false;
@@ -335,8 +335,8 @@ function updateStatus(vi, en) {
 
 function updateGuide() {
   const { width, height } = preview.getBoundingClientRect();
-  if (!scanRegion || !width || !height) return;
-  const box = previewScanRegion(scanRegion, scanRegion.sourceWidth, scanRegion.sourceHeight, width, height);
+  if (!videoSize || !width || !height) return;
+  const box = previewFrameBounds(videoSize.width, videoSize.height, width, height);
   for (const [name, value] of Object.entries(box)) guide.style[name] = `${value}px`;
   guide.hidden = false;
 }
@@ -379,7 +379,7 @@ function stopTracks(reason) {
   stableCardGate.reset();
   lastVideoTime = -1;
   previousScanPixels.clear();
-  scanRegion = undefined;
+  videoSize = undefined;
   guide.hidden = true;
   guide.classList.remove('recognized');
   document.body.classList.remove('assistant-scanning');
@@ -528,27 +528,26 @@ function scanLoop() {
     lastVideoTime = video.currentTime;
     lastFrameAt = now;
     const { videoWidth: width, videoHeight: height } = video;
-    if (scanRegion?.sourceWidth !== width || scanRegion?.sourceHeight !== height) {
-      const region = cameraScanRegion(width, height);
+    if (videoSize?.width !== width || videoSize?.height !== height) {
+      const { scanWidth, scanHeight } = cameraScanSize(width, height);
       scanLog?.event(firstFrameSeen ? 'video.resized' : 'video.first-frame', {
-        width, height, scanWidth: region.scanWidth, scanHeight: region.scanHeight,
-        region: { x: region.x, y: region.y, width: region.width, height: region.height },
+        width, height, scanWidth, scanHeight, region: { x: 0, y: 0, width, height },
       });
       firstFrameSeen = true;
       if (!isFullHd(width, height)) {
         cameraError(runNumber, 'video-frame', { name: 'CameraBelowFullHd' });
         return;
       }
-      scanRegion = { ...region, sourceWidth: width, sourceHeight: height };
-      capture.width = region.scanWidth;
-      capture.height = region.scanHeight;
+      videoSize = { width, height };
+      capture.width = scanWidth;
+      capture.height = scanHeight;
       updateGuide();
       previousScanPixels.clear();
       stableCardGate.reset();
     }
     try {
       const ctx = capture.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(video, scanRegion.x, scanRegion.y, scanRegion.width, scanRegion.height, 0, 0, capture.width, capture.height);
+      ctx.drawImage(video, 0, 0, capture.width, capture.height);
       const { card: found, pose, motion, paper, ambiguous, corners, candidates } = scanCardFrame(capture, previousScanPixels);
       const accepted = stableCardGate.update(found, motion, now, { pose, allowMiss: paper && !ambiguous });
       const result = $('assistant-card-result');

@@ -4,7 +4,7 @@ import { agreeOnCard, alignedCornerMotion, cardCornerPose, createStableCardGate,
 import { cardRotation, findCardCorners } from '../assistant-corners.mjs';
 import { choosePacketFace, hasCoveringEdge } from '../assistant-packet.mjs';
 import { createScanLog } from '../assistant-diagnostics.mjs';
-import { cameraScanRegion, isFullHd, previewScanRegion, requireFullHd } from '../assistant-camera.mjs';
+import { cameraScanSize, isFullHd, previewFrameBounds, requireFullHd } from '../assistant-camera.mjs';
 
 const card = { rank: 'Q', suit: 'S' };
 
@@ -32,14 +32,12 @@ test('requests native Full HD and retries only a transposed resolution', async (
   assert.equal(isFullHd(1920, 720), false);
 });
 
-test('the wider guide follows the scan region on a preview with horizontal or vertical bars', () => {
-  const portrait = cameraScanRegion(1080, 1920);
-  assert.deepEqual(portrait, { x: 129, y: 598, width: 821, height: 724, scanWidth: 553, scanHeight: 488 });
-  assert.deepEqual(previewScanRegion(portrait, 1080, 1920, 360, 480), { left: 77.25, top: 149.5, width: 205.25, height: 181 });
-  const landscape = cameraScanRegion(1920, 1080);
-  assert.deepEqual(landscape, { x: 441, y: 178, width: 1037, height: 724, scanWidth: 622, scanHeight: 434 });
-  assert.deepEqual(previewScanRegion(landscape, 1920, 1080, 480, 360), { left: 110.25, top: 89.5, width: 259.25, height: 181 });
-  assert.deepEqual(cameraScanRegion(3840, 2160), { x: 883, y: 356, width: 2074, height: 1447, scanWidth: 622, scanHeight: 434 });
+test('the full-frame scan and guide preserve the video aspect ratio in both orientations', () => {
+  assert.deepEqual(cameraScanSize(1080, 1920), { scanWidth: 576, scanHeight: 1024 });
+  assert.deepEqual(cameraScanSize(1920, 1080), { scanWidth: 1024, scanHeight: 576 });
+  assert.deepEqual(cameraScanSize(3840, 2160), { scanWidth: 1024, scanHeight: 576 });
+  assert.deepEqual(previewFrameBounds(1080, 1920, 360, 480), { left: 45, top: 0, width: 270, height: 480 });
+  assert.deepEqual(previewFrameBounds(1920, 1080, 480, 360), { left: 0, top: 45, width: 480, height: 270 });
 });
 
 function packetScene({ x, y, artwork = false } = {}) {

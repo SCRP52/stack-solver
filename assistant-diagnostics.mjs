@@ -1,4 +1,4 @@
-export const assistantBuild = '46';
+export const assistantBuild = '47';
 const startupEvents = new Set(['session.start', 'camera.opened', 'video.first-frame']);
 
 export function createScanLog({ now = () => Date.now(), maxEntries = 220 } = {}) {

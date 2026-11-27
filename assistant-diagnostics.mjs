@@ -1,4 +1,5 @@
-export const assistantBuild = '45';
+export const assistantBuild = '46';
+const startupEvents = new Set(['session.start', 'camera.opened', 'video.first-frame']);
 
 export function createScanLog({ now = () => Date.now(), maxEntries = 220 } = {}) {
   const started = now();
@@ -12,8 +13,9 @@ export function createScanLog({ now = () => Date.now(), maxEntries = 220 } = {})
 
   function event(name, details = {}) {
     if (entries.length >= maxEntries) {
-      // Preserve the first event so camera startup is still available after a long scan.
-      entries.splice(1, 1);
+      // Retain the source resolution and scan region after long sessions.
+      const oldest = entries.findIndex(entry => !startupEvents.has(entry.event));
+      entries.splice(oldest < 0 ? 1 : oldest, 1);
       discardedEntries++;
     }
     entries.push({ elapsedMs: now() - started, event: name, ...details });

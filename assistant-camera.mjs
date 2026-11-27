@@ -24,12 +24,17 @@ export async function requireFullHd(track, nativeResize) {
 }
 
 export function cameraScanRegion(width, height) {
-  const size = Math.round(Math.min(width, height) * 4 / 9);
+  const shortSide = Math.min(width, height);
+  const regionWidth = Math.round(shortSide * (width > height ? .96 : .76));
+  const regionHeight = Math.round(shortSide * .67);
+  const scale = Math.min(1, Math.sqrt(270000 / (regionWidth * regionHeight)));
   return {
-    x: Math.floor((width - size) / 2),
-    y: Math.floor((height - size) / 2),
-    size,
-    scanSize: Math.min(size, 540),
+    x: Math.floor((width - regionWidth) / 2),
+    y: Math.floor((height - regionHeight) / 2),
+    width: regionWidth,
+    height: regionHeight,
+    scanWidth: Math.round(regionWidth * scale),
+    scanHeight: Math.round(regionHeight * scale),
   };
 }
 
@@ -38,7 +43,7 @@ export function previewScanRegion(region, width, height, viewWidth, viewHeight) 
   return {
     left: (viewWidth - width * scale) / 2 + region.x * scale,
     top: (viewHeight - height * scale) / 2 + region.y * scale,
-    width: region.size * scale,
-    height: region.size * scale,
+    width: region.width * scale,
+    height: region.height * scale,
   };
 }

@@ -1,9 +1,9 @@
-import { createStableCardGate } from './assistant-scan-logic.mjs?v=39';
+import { alignedCornerMotion, cardCornerPose, createStableCardGate } from './assistant-scan-logic.mjs?v=46';
 import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=41';
 import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
 import { choosePacketFace } from './assistant-packet.mjs?v=42';
-import { createScanLog } from './assistant-diagnostics.mjs?v=45';
-import { cameraScanRegion, isFullHd, previewScanRegion, requireFullHd } from './assistant-camera.mjs?v=45';
+import { createScanLog } from './assistant-diagnostics.mjs?v=46';
+import { cameraScanRegion, isFullHd, previewScanRegion, requireFullHd } from './assistant-camera.mjs?v=46';
 
 const $ = id => document.getElementById(id);
 const capture = $('assistant-frame');
@@ -33,7 +33,7 @@ let firstFrameSeen;
 let scanRegion;
 let ownedFullscreen;
 let originalThemeColor;
-const stableCardGate = createStableCardGate();
+const stableCardGate = createStableCardGate({ maxMotion: 22 });
 const scanIntervalMs = 55;
 let lastVideoTime = -1;
 let scanning = false;
@@ -300,33 +300,10 @@ function readCorner(width, corner) {
   return primary.score >= alternate.score ? primary : alternate;
 }
 
-function cornerMotion(previous, current, { width, height }, { rank, suit, rotation }) {
-  if (previous?.length !== current.length) return Infinity;
-  const margin = Math.max(2, Math.round(rank.h * .15));
-  const left = Math.min(rank.x, suit.x) - margin;
-  const right = Math.max(rank.right, suit.right) + margin;
-  const { cos, sin } = rotation;
-  let difference = 0, samples = 0;
-  for (let y = rank.y - margin; y <= suit.bottom + margin; y++) {
-    for (let x = left; x <= right; x++) {
-      const sourceX = Math.round(x * cos - y * sin), sourceY = Math.round(x * sin + y * cos);
-      if (sourceX < 0 || sourceX >= width || sourceY < 0 || sourceY >= height) continue;
-      const i = sourceY * width + sourceX;
-      difference += Math.abs(previous[i] - current[i]);
-      samples++;
-    }
-  }
-  return samples ? difference / samples : Infinity;
-}
-
 export function scanCardFrame(frame, history) {
   const { width, height } = frame;
   const context = frame.getContext('2d', { willReadFrequently: true });
   const { corners, gray, paper } = findCardCorners(context.getImageData(0, 0, width, height));
-  const previous = history.get(width);
-  history.clear();
-  history.set(width, gray);
-
   const reads = [];
   for (const corner of corners) {
     const card = readCorner(width, corner);
@@ -335,9 +312,14 @@ export function scanCardFrame(frame, history) {
     reads.push({ card, corner: { ...corner, mirrored: card.mirrored }, score });
   }
   const { best, ambiguous } = choosePacketFace(reads, { gray, width, height });
+  const pose = best ? cardCornerPose(best.corner) : undefined;
+  const previous = history.get(width);
+  if (best) history.set(width, { gray, pose });
+  else if (ambiguous || !paper) history.clear();
   return {
     card: best?.card ?? null,
-    motion: best ? cornerMotion(previous, gray, frame, best.corner) : 0,
+    pose,
+    motion: pose ? alignedCornerMotion(previous?.gray, gray, frame, previous?.pose, pose) : 0,
     paper,
     ambiguous,
     corners: corners.length,
@@ -549,8 +531,8 @@ function scanLoop() {
     if (scanRegion?.sourceWidth !== width || scanRegion?.sourceHeight !== height) {
       const region = cameraScanRegion(width, height);
       scanLog?.event(firstFrameSeen ? 'video.resized' : 'video.first-frame', {
-        width, height, scanWidth: region.scanSize, scanHeight: region.scanSize,
-        region: { x: region.x, y: region.y, size: region.size },
+        width, height, scanWidth: region.scanWidth, scanHeight: region.scanHeight,
+        region: { x: region.x, y: region.y, width: region.width, height: region.height },
       });
       firstFrameSeen = true;
       if (!isFullHd(width, height)) {
@@ -558,24 +540,25 @@ function scanLoop() {
         return;
       }
       scanRegion = { ...region, sourceWidth: width, sourceHeight: height };
-      capture.width = capture.height = region.scanSize;
+      capture.width = region.scanWidth;
+      capture.height = region.scanHeight;
       updateGuide();
       previousScanPixels.clear();
       stableCardGate.reset();
     }
     try {
       const ctx = capture.getContext('2d', { willReadFrequently: true });
-      const { x, y, size } = scanRegion;
-      ctx.drawImage(video, x, y, size, size, 0, 0, capture.width, capture.height);
-      const { card: found, motion: stillness, paper, ambiguous, corners, candidates } = scanCardFrame(capture, previousScanPixels);
-      const accepted = stableCardGate.update(found, stillness, now);
+      ctx.drawImage(video, scanRegion.x, scanRegion.y, scanRegion.width, scanRegion.height, 0, 0, capture.width, capture.height);
+      const { card: found, pose, motion, paper, ambiguous, corners, candidates } = scanCardFrame(capture, previousScanPixels);
+      const accepted = stableCardGate.update(found, motion, now, { pose, allowMiss: paper && !ambiguous });
       const result = $('assistant-card-result');
       const name = accepted ? accepted.rank + suitSymbols[accepted.suit] : '';
       if (result.textContent !== name) result.textContent = name;
       guide.classList.toggle('recognized', Boolean(accepted));
-      const phase = accepted ? 'recognized' : ambiguous ? 'overlap' :
+      const phase = accepted ? (found ? 'recognized' : 'held') : ambiguous ? 'overlap' :
         !paper ? 'no-paper' : found ? 'settling' : !corners ? 'no-index' : 'unreadable-index';
-      scanPhase(phase, { corners, candidates, card: accepted ? accepted.rank + accepted.suit : undefined });
+      scanPhase(phase, { corners, candidates, card: accepted ? accepted.rank + accepted.suit : undefined,
+        motion: found ? (Number.isFinite(motion) ? Math.round(motion) : 'new-or-shifted') : undefined });
       scanLog?.frame(phase, performance.now() - now);
       if (accepted) updateStatus('Đã nhận diện', 'Card recognized');
       else if (ambiguous) updateStatus('Ép vuông bộ bài để lộ một góc', 'Square the deck so only one corner is visible');

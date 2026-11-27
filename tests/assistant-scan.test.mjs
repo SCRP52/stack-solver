@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { agreeOnCard, createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
+import { agreeOnCard, alignedCornerMotion, cardCornerPose, createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
 import { cardRotation, findCardCorners } from '../assistant-corners.mjs';
 import { choosePacketFace, hasCoveringEdge } from '../assistant-packet.mjs';
 import { createScanLog } from '../assistant-diagnostics.mjs';
@@ -32,14 +32,14 @@ test('requests native Full HD and retries only a transposed resolution', async (
   assert.equal(isFullHd(1920, 720), false);
 });
 
-test('the guide follows the native detail region on a preview with horizontal or vertical bars', () => {
+test('the wider guide follows the scan region on a preview with horizontal or vertical bars', () => {
   const portrait = cameraScanRegion(1080, 1920);
-  assert.deepEqual(portrait, { x: 300, y: 720, size: 480, scanSize: 480 });
-  assert.deepEqual(previewScanRegion(portrait, 1080, 1920, 360, 480), { left: 120, top: 180, width: 120, height: 120 });
+  assert.deepEqual(portrait, { x: 129, y: 598, width: 821, height: 724, scanWidth: 553, scanHeight: 488 });
+  assert.deepEqual(previewScanRegion(portrait, 1080, 1920, 360, 480), { left: 77.25, top: 149.5, width: 205.25, height: 181 });
   const landscape = cameraScanRegion(1920, 1080);
-  assert.deepEqual(landscape, { x: 720, y: 300, size: 480, scanSize: 480 });
-  assert.deepEqual(previewScanRegion(landscape, 1920, 1080, 480, 360), { left: 180, top: 120, width: 120, height: 120 });
-  assert.deepEqual(cameraScanRegion(3840, 2160), { x: 1440, y: 600, size: 960, scanSize: 540 });
+  assert.deepEqual(landscape, { x: 441, y: 178, width: 1037, height: 724, scanWidth: 622, scanHeight: 434 });
+  assert.deepEqual(previewScanRegion(landscape, 1920, 1080, 480, 360), { left: 110.25, top: 89.5, width: 259.25, height: 181 });
+  assert.deepEqual(cameraScanRegion(3840, 2160), { x: 883, y: 356, width: 2074, height: 1447, scanWidth: 622, scanHeight: 434 });
 });
 
 function packetScene({ x, y, artwork = false } = {}) {
@@ -86,15 +86,17 @@ test('holds ambiguous adjacent ranks blank and accepts an isolated or repeated r
 
 test('diagnostic export keeps startup and aggregates scan results in a bounded JSON file', () => {
   let time = 0;
-  const log = createScanLog({ now: () => time, maxEntries: 3 });
+  const log = createScanLog({ now: () => time, maxEntries: 5 });
   log.event('session.start', { orientation: 'portrait' });
-  log.event('camera.opened', { width: 640 });
+  log.event('screen.fullscreen');
+  log.event('camera.opened', { width: 1080 });
+  log.event('video.first-frame', { width: 1080, height: 1920 });
   log.frame('no-index', 10);
   time = 1234;
   log.frame('recognized', 30);
   log.event('session.stop', { reason: 'user' });
   const file = JSON.parse(log.serialize());
-  assert.equal(file.entries[0].event, 'session.start');
+  assert.deepEqual(file.entries.slice(0, 3).map(entry => entry.event), ['session.start', 'camera.opened', 'video.first-frame']);
   assert.equal(file.discardedEntries, 1);
   const summary = file.entries.find(entry => entry.event === 'scan.summary');
   assert.deepEqual(summary.outcomes, { 'no-index': 1, recognized: 1 });
@@ -222,6 +224,50 @@ test('a card change starts a fresh stability window', () => {
   assert.equal(gate.update(other, 0, 180), null);
   assert.equal(gate.update(other, 0, 310), null);
   assert.deepEqual(gate.update(other, 0, 380), other);
+});
+
+test('index motion compensates for a small translation and rejects a large shift or changed image', () => {
+  const width = 120, height = 100;
+  function scene(x, y) {
+    const gray = new Uint8Array(width * height).fill(231);
+    for (let row = y; row < y + 34; row++) {
+      for (let col = x; col < x + 10; col++) gray[row * width + col] = (col === x + 4 || row === y + 8) ? 15 : 92;
+    }
+    return gray;
+  }
+  const from = cardCornerPose(packetIndex(35, 28));
+  const to = cardCornerPose(packetIndex(44, 25));
+  const previous = scene(35, 28);
+  assert.equal(alignedCornerMotion(previous, scene(44, 25), { width, height }, from, to), 0);
+  assert.ok(alignedCornerMotion(previous, new Uint8Array(previous.length), { width, height }, from, to) > 22);
+  const shifted = cardCornerPose(packetIndex(65, 28));
+  assert.equal(alignedCornerMotion(previous, scene(65, 28), { width, height }, from, shifted), Infinity);
+});
+
+test('the gate tolerates one unclear frame but clears on a second miss, a conflict or a different card', () => {
+  const gate = createStableCardGate();
+  const oneMiss = { allowMiss: true };
+  gate.update(card, Infinity, 0);
+  gate.update(card, 0, 70);
+  assert.equal(gate.update(null, 0, 140, oneMiss), null);
+  assert.equal(gate.update(card, 0, 210), card);
+  assert.equal(gate.update(null, 0, 270, oneMiss), card);
+  assert.equal(gate.update(null, 0, 330, oneMiss), null);
+  assert.equal(gate.update(card, 0, 400), null);
+  gate.update(card, 0, 470);
+  assert.equal(gate.update(card, 0, 600), card);
+  assert.equal(gate.update(null, 0, 650), null);
+  gate.update(card, 0, 700);
+  gate.update(card, 0, 800);
+  assert.equal(gate.update(card, 0, 900), card);
+  assert.equal(gate.update({ rank: 'J', suit: 'H' }, 0, 970), null);
+});
+
+test('a passing card cannot settle by moving steadily at a tolerable speed per frame', () => {
+  const gate = createStableCardGate();
+  for (let frame = 0; frame < 9; frame++) {
+    assert.equal(gate.update(card, 0, frame * 70, { pose: { x: frame * 12, y: 48, span: 24 } }), null);
+  }
 });
 
 test('pixel motion is measured as average gray-level change', () => {

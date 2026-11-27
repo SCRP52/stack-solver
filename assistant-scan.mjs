@@ -1,14 +1,16 @@
-import { alignedCornerMotion, cardCornerPose, createStableCardGate } from './assistant-scan-logic.mjs?v=46';
+import { alignedCornerMotion, cardCornerPose, createCardMemory, createStableCardGate } from './assistant-scan-logic.mjs?v=48';
 import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=41';
 import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
 import { choosePacketFace } from './assistant-packet.mjs?v=42';
-import { createScanLog } from './assistant-diagnostics.mjs?v=47';
-import { cameraScanSize, isFullHd, previewFrameBounds, requireFullHd } from './assistant-camera.mjs?v=47';
+import { createScanLog } from './assistant-diagnostics.mjs?v=48';
+import { cameraScanSize, enableContinuousFocus, isFullHd, previewFrameBounds, requireFullHd } from './assistant-camera.mjs?v=48';
 
 const $ = id => document.getElementById(id);
 const capture = $('assistant-frame');
 const preview = $('assistant-preview');
 const guide = $('assistant-scan-guide');
+const cardResult = $('assistant-card-result');
+const lastRead = $('assistant-last-read');
 const ocrCrop = document.createElement('canvas');
 ocrCrop.width = 32;
 ocrCrop.height = 40;
@@ -29,11 +31,13 @@ let runNumber = 0;
 let scanLog;
 let phaseKey;
 let lastFrameAt;
+let unreadableSince;
 let firstFrameSeen;
 let videoSize;
 let ownedFullscreen;
 let originalThemeColor;
-const stableCardGate = createStableCardGate({ maxMotion: 22, maxGap: 320 });
+const stableCardGate = createStableCardGate({ maxMotion: 22 });
+const cardMemory = createCardMemory();
 const scanIntervalMs = 55;
 let lastVideoTime = -1;
 let scanning = false;
@@ -333,6 +337,15 @@ function updateStatus(vi, en) {
   if (status.textContent !== message) status.textContent = message;
 }
 
+function renderCard(now, confirmed = null) {
+  if (confirmed) cardMemory.remember(confirmed, now);
+  const card = cardMemory.read(now);
+  const name = card ? card.rank + suitSymbols[card.suit] : '';
+  if (cardResult.textContent !== name) cardResult.textContent = name;
+  lastRead.hidden = Boolean(confirmed || !card);
+  guide.classList.toggle('recognized', Boolean(confirmed));
+}
+
 function updateGuide() {
   const { width, height } = preview.getBoundingClientRect();
   if (!videoSize || !width || !height) return;
@@ -377,17 +390,17 @@ function stopTracks(reason) {
   ownedFullscreen = false;
   try { screen.orientation?.unlock(); } catch {}
   stableCardGate.reset();
+  cardMemory.reset();
+  renderCard(performance.now());
   lastVideoTime = -1;
   previousScanPixels.clear();
   videoSize = undefined;
   guide.hidden = true;
-  guide.classList.remove('recognized');
   document.body.classList.remove('assistant-scanning');
   if (originalThemeColor !== undefined) document.querySelector('meta[name="theme-color"]').content = originalThemeColor;
   originalThemeColor = undefined;
   $('assistant-live').hidden = true;
   $('assistant-setup').hidden = false;
-  $('assistant-card-result').textContent = '';
   $('assistant-start').disabled = false;
   $('assistant-log-download').disabled = !scanLog;
 }
@@ -453,6 +466,7 @@ async function start() {
   });
   scanning = true;
   phaseKey = '';
+  unreadableSince = undefined;
   firstFrameSeen = false;
   ownedFullscreen = false;
   $('assistant-start').disabled = true;
@@ -462,7 +476,7 @@ async function start() {
   document.body.classList.add('assistant-scanning');
   $('assistant-setup').hidden = true;
   $('assistant-live').hidden = false;
-  $('assistant-card-result').textContent = '';
+  renderCard(performance.now());
   $('assistant-camera-note').textContent = '';
   updateStatus('Đang mở camera…', 'Opening camera…');
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -495,6 +509,9 @@ async function start() {
     const nativeResize = navigator.mediaDevices.getSupportedConstraints?.().resizeMode;
     await requireFullHd(track, nativeResize);
     if (session !== runNumber) return;
+    const focus = await enableContinuousFocus(track);
+    if (session !== runNumber) return;
+    scanLog.event('camera.focus', focus);
     const { width, height, frameRate, facingMode, resizeMode } = track.getSettings?.() ?? {};
     scanLog.event('camera.opened', { width, height, frameRate, facingMode, resizeMode, muted: track.muted });
     stage = 'playback';
@@ -544,17 +561,17 @@ function scanLoop() {
       updateGuide();
       previousScanPixels.clear();
       stableCardGate.reset();
+      unreadableSince = undefined;
     }
     try {
       const ctx = capture.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(video, 0, 0, capture.width, capture.height);
       const { card: found, pose, motion, paper, ambiguous, corners, candidates } = scanCardFrame(capture, previousScanPixels);
       const accepted = stableCardGate.update(found, motion, now, { pose, allowMiss: paper && !ambiguous });
-      const result = $('assistant-card-result');
-      const name = accepted ? accepted.rank + suitSymbols[accepted.suit] : '';
-      if (result.textContent !== name) result.textContent = name;
-      guide.classList.toggle('recognized', Boolean(accepted));
-      const phase = accepted ? (found ? 'recognized' : 'held') : ambiguous ? 'overlap' :
+      renderCard(now, accepted);
+      if (found || ambiguous || !paper) unreadableSince = undefined;
+      else unreadableSince ??= now;
+      const phase = accepted ? 'recognized' : ambiguous ? 'overlap' :
         !paper ? 'no-paper' : found ? 'settling' : !corners ? 'no-index' : 'unreadable-index';
       scanPhase(phase, { corners, candidates, card: accepted ? accepted.rank + accepted.suit : undefined,
         motion: found ? (Number.isFinite(motion) ? Math.round(motion) : 'new-or-shifted') : undefined });
@@ -562,20 +579,24 @@ function scanLoop() {
       if (accepted) updateStatus('Đã nhận diện', 'Card recognized');
       else if (ambiguous) updateStatus('Ép vuông bộ bài để lộ một góc', 'Square the deck so only one corner is visible');
       else if (found) updateStatus('Giữ lá bài yên khoảng 0,2 giây', 'Hold the card still for about 0.2 seconds');
+      else if (now - unreadableSince >= 650) updateStatus('Nếu ảnh mờ, lùi lá ra một chút để lấy nét',
+        'If the card is blurry, move it back a little to bring it into focus');
       else updateStatus('Đưa góc có số và chất vào khung', 'Place the rank and suit corner inside the box');
     } catch (error) {
-      $('assistant-card-result').textContent = '';
-      guide.classList.remove('recognized');
+      renderCard(now);
+      unreadableSince = undefined;
       stableCardGate.reset();
       scanPhase('processing-error', { code: error.name });
       updateStatus('Không xử lý được khung hình', 'Could not process the camera frame');
     }
   } else if (now - lastFrameAt >= 1600) {
-    $('assistant-card-result').textContent = '';
-    guide.classList.remove('recognized');
+    renderCard(now);
+    unreadableSince = undefined;
     stableCardGate.reset();
     scanPhase('no-frames', { readyState: video.readyState, paused: video.paused, trackMuted: stream?.getVideoTracks()[0]?.muted });
     updateStatus('Camera chưa gửi khung hình', 'Waiting for video frames from the camera');
+  } else if (cardResult.textContent && !cardMemory.read(now)) {
+    renderCard(now);
   }
   frameTimer = setTimeout(scanLoop, Math.max(0, scanIntervalMs - (performance.now() - now)));
 }

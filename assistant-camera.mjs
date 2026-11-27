@@ -23,6 +23,33 @@ export async function requireFullHd(track, nativeResize) {
   }
 }
 
+export async function enableContinuousFocus(track) {
+  const previous = track.getSettings?.() ?? {};
+  if (previous.focusMode === 'continuous') return { result: 'active', mode: previous.focusMode };
+  if (!track.getCapabilities?.()?.focusMode?.includes('continuous')) {
+    return { result: 'unavailable', mode: previous.focusMode };
+  }
+  const videoConstraints = track.getConstraints();
+  const focusMode = { exact: 'continuous' };
+  try {
+    try {
+      await track.applyConstraints({ ...videoConstraints, focusMode });
+    } catch (error) {
+      // Chromium can require camera controls and video dimensions in separate calls.
+      if (error.name !== 'OverconstrainedError' || error.constraint) throw error;
+      await track.applyConstraints({ focusMode });
+    }
+  } catch (error) {
+    return { result: 'failed', mode: previous.focusMode, code: error.name };
+  }
+  const { width, height, focusMode: mode } = track.getSettings?.() ?? {};
+  if (width && height && !isFullHd(width, height)) {
+    await track.applyConstraints(videoConstraints);
+    return { result: 'skipped-below-full-hd', mode: track.getSettings?.()?.focusMode };
+  }
+  return { result: mode === 'continuous' ? 'active' : 'unconfirmed', mode };
+}
+
 export function cameraScanSize(width, height) {
   const scale = Math.min(1, 1024 / Math.max(width, height), Math.sqrt(630000 / (width * height)));
   return {

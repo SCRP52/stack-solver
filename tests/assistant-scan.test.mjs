@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { agreeOnCard, alignedCornerMotion, cardCornerPose, createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
+import { agreeOnCard, alignedCornerMotion, cardCornerPose, createCardMemory, createStableCardGate, meanPixelDifference } from '../assistant-scan-logic.mjs';
 import { cardRotation, findCardCorners } from '../assistant-corners.mjs';
 import { choosePacketFace, hasCoveringEdge } from '../assistant-packet.mjs';
 import { createScanLog } from '../assistant-diagnostics.mjs';
-import { cameraScanSize, isFullHd, previewFrameBounds, requireFullHd } from '../assistant-camera.mjs';
+import { cameraScanSize, enableContinuousFocus, isFullHd, previewFrameBounds, requireFullHd } from '../assistant-camera.mjs';
 
 const card = { rank: 'Q', suit: 'S' };
 
@@ -38,6 +38,41 @@ test('the full-frame scan and guide preserve the video aspect ratio in both orie
   assert.deepEqual(cameraScanSize(3840, 2160), { scanWidth: 1024, scanHeight: 576 });
   assert.deepEqual(previewFrameBounds(1080, 1920, 360, 480), { left: 45, top: 0, width: 270, height: 480 });
   assert.deepEqual(previewFrameBounds(1920, 1080, 480, 360), { left: 0, top: 45, width: 480, height: 270 });
+});
+
+test('autofocus retains Full HD when the browser accepts or separates camera controls', async () => {
+  const video = { width: { min: 1920 }, height: { min: 1080 }, resizeMode: { exact: 'none' } };
+  for (const separate of [false, true]) {
+    let mode = 'none';
+    const requests = [];
+    const track = {
+      getSettings: () => ({ width: 1920, height: 1080, focusMode: mode }),
+      getCapabilities: () => ({ focusMode: ['none', 'continuous'] }),
+      getConstraints: () => video,
+      async applyConstraints(constraints) {
+        requests.push(constraints);
+        if (separate && constraints.width) throw Object.assign(new Error(), { name: 'OverconstrainedError' });
+        mode = constraints.focusMode?.exact;
+      },
+    };
+    assert.deepEqual(await enableContinuousFocus(track), { result: 'active', mode: 'continuous' });
+    assert.deepEqual(requests, separate ? [{ ...video, focusMode: { exact: 'continuous' } }, { focusMode: { exact: 'continuous' } }]
+      : [{ ...video, focusMode: { exact: 'continuous' } }]);
+  }
+  assert.deepEqual(await enableContinuousFocus({ getSettings: () => ({ focusMode: 'none' }) }), { result: 'unavailable', mode: 'none' });
+});
+
+test('autofocus rolls back a control that drops the camera below Full HD', async () => {
+  const video = { width: { min: 1920 }, height: { min: 1080 } };
+  let mode = 'none';
+  const track = {
+    getSettings: () => mode === 'continuous' ? { width: 1280, height: 720, focusMode: mode } : { width: 1920, height: 1080, focusMode: mode },
+    getCapabilities: () => ({ focusMode: ['continuous'] }),
+    getConstraints: () => video,
+    async applyConstraints(constraints) { mode = constraints.focusMode?.exact ?? 'none'; },
+  };
+  assert.deepEqual(await enableContinuousFocus(track), { result: 'skipped-below-full-hd', mode: 'none' });
+  assert.ok(isFullHd(track.getSettings().width, track.getSettings().height));
 });
 
 function packetScene({ x, y, artwork = false } = {}) {
@@ -242,14 +277,14 @@ test('index motion compensates for a small translation and rejects a large shift
   assert.equal(alignedCornerMotion(previous, scene(65, 28), { width, height }, from, shifted), Infinity);
 });
 
-test('the gate tolerates one unclear frame but clears on a second miss, a conflict or a different card', () => {
+test('the vote survives one unreadable frame, but repeated misses or overlap clear the votes', () => {
   const gate = createStableCardGate();
   const oneMiss = { allowMiss: true };
   gate.update(card, Infinity, 0);
   gate.update(card, 0, 70);
   assert.equal(gate.update(null, 0, 140, oneMiss), null);
   assert.equal(gate.update(card, 0, 210), card);
-  assert.equal(gate.update(null, 0, 270, oneMiss), card);
+  assert.equal(gate.update(null, 0, 270, oneMiss), null);
   assert.equal(gate.update(null, 0, 330, oneMiss), null);
   assert.equal(gate.update(card, 0, 400), null);
   gate.update(card, 0, 470);
@@ -259,6 +294,36 @@ test('the gate tolerates one unclear frame but clears on a second miss, a confli
   gate.update(card, 0, 800);
   assert.equal(gate.update(card, 0, 900), card);
   assert.equal(gate.update({ rank: 'J', suit: 'H' }, 0, 970), null);
+});
+
+test('a brief wrong reading cannot beat the majority of matching rank-and-suit votes', () => {
+  const gate = createStableCardGate();
+  const minority = { rank: 'Q', suit: 'C' };
+  for (const [index, reading] of [card, minority, card, minority].entries()) {
+    assert.equal(gate.update(reading, 0, index * 75), null);
+  }
+  assert.equal(gate.update(card, 0, 300), card);
+  assert.equal(gate.update(minority, 0, 375), null);
+  assert.equal(gate.update(card, 0, 450), card);
+  assert.equal(gate.update(minority, Infinity, 525), null);
+  assert.equal(gate.update(minority, 0, 625), null);
+  assert.equal(gate.update(minority, 0, 725), minority);
+});
+
+test('a confirmed card stays available for four seconds and a fresh confirmation replaces it', () => {
+  const memory = createCardMemory();
+  const newer = { rank: 'A', suit: 'H' };
+  assert.equal(memory.read(0), null);
+  memory.remember(card, 100);
+  assert.equal(memory.read(4099), card);
+  assert.equal(memory.read(4100), null);
+  memory.remember(card, 4200);
+  memory.remember(newer, 4500);
+  assert.equal(memory.read(8499), newer);
+  assert.equal(memory.read(8500), null);
+  memory.remember(newer, 8600);
+  memory.reset();
+  assert.equal(memory.read(8601), null);
 });
 
 test('a passing card cannot settle by moving steadily at a tolerable speed per frame', () => {

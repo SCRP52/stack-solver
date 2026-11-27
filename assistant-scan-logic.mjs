@@ -49,51 +49,59 @@ export function alignedCornerMotion(previous, current, { width, height }, from, 
   return samples >= 200 ? difference / samples : Infinity;
 }
 
-export function createStableCardGate({ maxMotion = 7, minFrames = 3, minDuration = 200, maxGap = 170 } = {}) {
-  let candidateKey = '';
-  let candidateSince = 0;
-  let candidateFrames = 0;
+export function createStableCardGate({ maxMotion = 7, minFrames = 3, minDuration = 200, maxGap = 320, voteWindow = 650 } = {}) {
+  const votes = [];
   let origin;
   let lastSeen;
   let missed;
-  let accepted;
+  let settled;
 
   function reset() {
-    candidateKey = '';
-    candidateSince = 0;
-    candidateFrames = 0;
+    votes.length = 0;
     origin = undefined;
     lastSeen = undefined;
     missed = false;
-    accepted = null;
+    settled = false;
   }
 
   return {
     update(card, motion, now, { pose, allowMiss = false } = {}) {
       if (!card) {
-        if (allowMiss && candidateKey && !missed && now - lastSeen <= maxGap) {
+        if (allowMiss && votes.length && !missed && now - lastSeen <= maxGap) {
           missed = true;
-          return accepted;
+          return null;
         }
         reset();
         return null;
       }
       const key = `${card.rank}${card.suit}`;
-      const movedDuringCapture = !accepted && origin && pose &&
+      const movedDuringCapture = !settled && origin && pose &&
         Math.hypot(origin.x - pose.x, origin.y - pose.y) > Math.max(18, Math.min(44, origin.span));
-      if (key !== candidateKey || (missed && now - lastSeen > maxGap) ||
-          !Number.isFinite(motion) || motion > maxMotion || movedDuringCapture) {
-        reset();
-        candidateKey = key;
-        candidateSince = now;
-        origin = pose;
-      }
+      if (now - lastSeen > maxGap || !Number.isFinite(motion) || motion > maxMotion || movedDuringCapture) reset();
+      while (votes.length && now - votes[0].at > voteWindow) votes.shift();
+      if (!votes.length) origin = pose;
       lastSeen = now;
       missed = false;
-      candidateFrames++;
-      accepted = candidateFrames >= minFrames && now - candidateSince >= minDuration ? card : null;
-      return accepted;
+      votes.push({ key, at: now });
+      const matching = votes.filter(vote => vote.key === key);
+      if (matching.length < minFrames || matching.length * 2 <= votes.length ||
+          now - matching[0].at < minDuration) return null;
+      settled = true;
+      return card;
     },
     reset,
+  };
+}
+
+export function createCardMemory({ holdMs = 4000 } = {}) {
+  let card;
+  let expiresAt;
+  return {
+    remember(confirmed, now) {
+      card = confirmed;
+      expiresAt = now + holdMs;
+    },
+    read(now) { return card && now < expiresAt ? card : null; },
+    reset() { card = undefined; },
   };
 }

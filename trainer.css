@@ -52,6 +52,8 @@
 .assistant-scan-guide.recognized { border-color: #f7596e; }
 .assistant-live-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 64px; padding: 8px 12px; }
 .assistant-scan-status { margin: 0; color: #ddd; font-size: .82rem; }
+.assistant-readout { display: flex; align-items: baseline; gap: 8px; }
+.assistant-readout small { color: #bbb; font-size: .72rem; }
 .assistant-card-result { display: block; color: #fff; font-size: clamp(1rem, 4vw, 1.35rem); font-weight: 650; letter-spacing: .04em; }
 .assistant-card-result:empty { display: none; }
 .assistant-stop { min-height: 44px; padding: 8px 12px; background: #171717; color: #fff; border-color: #696969; font-size: .82rem; }

@@ -7,7 +7,7 @@
   <title>Stack Trainer</title>
   <link rel="icon" type="image/png" href="./assets/stack-trainer-logo.png">
   <link rel="stylesheet" href="./app.css?v=36">
-  <link rel="stylesheet" href="./trainer.css?v=45">
+  <link rel="stylesheet" href="./trainer.css?v=48">
 </head>
 <body class="trainer-page">
   <header class="header trainer-header">
@@ -254,7 +254,10 @@
           <div class="assistant-live-controls">
             <div>
               <p id="assistant-scan-status" class="assistant-scan-status" role="status" aria-live="polite">Đang quét</p>
-              <output id="assistant-card-result" class="assistant-card-result" aria-live="polite"></output>
+              <div class="assistant-readout">
+                <output id="assistant-card-result" class="assistant-card-result" aria-live="polite"></output>
+                <small id="assistant-last-read" data-en="Last confirmed card" hidden>Lá đã đọc gần nhất</small>
+              </div>
             </div>
             <button type="button" id="assistant-stop" class="assistant-stop" data-en="Stop">Dừng</button>
           </div>
@@ -263,6 +266,6 @@
   </main>
   <script src="./vendor/ocrad/ocrad.js" defer></script>
   <script type="module" src="./trainer.mjs?v=44"></script>
-  <script type="module" src="./assistant-scan.mjs?v=47"></script>
+  <script type="module" src="./assistant-scan.mjs?v=48"></script>
 </body>
 </html>

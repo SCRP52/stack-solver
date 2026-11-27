@@ -3,8 +3,8 @@ import { message } from './i18n.mjs';
 import { ranks } from './solver.mjs';
 import { advanced, answerChoices, basic, grade, questionSet, stackModel } from './drills.mjs?v=33';
 import { drillCopy, drillDetails, groupCopy, groupDetails } from './trainer-copy.mjs?v=30';
-import { beyond, beyondQuestions, isJazzing, isRecallOrder, isSplit, parseSplit, splitDefaults } from './beyond.mjs?v=43';
-import { beyondDetails, beyondDrills, beyondGroups, handNames, specialBeyondPrompt } from './beyond-copy.mjs?v=43';
+import { beyond, beyondQuestions, isJazzing, isRecallOrder, isSplit, parseSplit, splitDefaults, twiceAsHardMiddle } from './beyond.mjs?v=44';
+import { beyondDetails, beyondDrills, beyondGroups, handNames, specialBeyondPrompt } from './beyond-copy.mjs?v=44';
 import { findJazzOptions, gradeJazz, jazzLength, jazzPositions, maxJazzGap, requiresBottom } from './jazzing.mjs?v=34';
 import { activeStackKey, readProgress, saveProgress, slowCards, summarize, weakCards } from './trainer-progress.mjs';
 import { exportStackCsv, importStackCsv } from './stack-csv.mjs';
@@ -290,6 +290,11 @@ function renderSetup() {
     $('drill-description').textContent = selectedDrill === 'all'
       ? t('Luyện xen kẽ các bài của cấp này trong cùng một lượt.', 'Practice drills from this level together in one session.')
       : t(...(drillDetails[selectedDrill] ?? beyondDetails[group] ?? groupDetails[group]));
+    if (selectedDrill === 'twice-as-hard') {
+      const marker = cardLabel(model.at(twiceAsHardMiddle - 1));
+      $('drill-description').append(t(` Mốc B của Fixed Middle là ${marker} ở vị trí ${twiceAsHardMiddle}.`,
+        `The Fixed Middle marker B is ${marker} at position ${twiceAsHardMiddle}.`));
+    }
     $('practice-mode-description').textContent = trial
       ? t('Làm đủ số câu đã chọn. Xem điểm và thời gian khi kết thúc.', 'Complete the selected number of questions and see your score and time at the end.')
       : t('Xem đáp án sau từng câu. Có thể dừng bất cứ lúc nào.', 'See the answer after each question. Stop whenever you like.');

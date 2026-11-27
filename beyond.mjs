@@ -13,6 +13,7 @@ export const beyond = {
 };
 
 export const splitDefaults = { 2: [26, 26], 3: [18, 17, 17], 4: [13, 13, 13, 13], 5: [11, 11, 10, 10, 10] };
+export const twiceAsHardMiddle = 30;
 export const suitOrder = ['♠', '♥', '♣', '♦'];
 export const isRecallOrder = kind => kind.startsWith('recall-');
 export const isSplit = kind => kind.startsWith('split-');
@@ -55,13 +56,11 @@ const question = (kind, args, answer, focus, shown = [], extra = {}) => ({ kind,
 
 function twiceAsHardQuestions(model) {
   const questions = [];
-  // Leave at least one possible selection cut in each interval, (A, B) and (B, C).
-  for (let low = 2; low <= deckLength - 3; low++) {
-    for (let high = low + 2; high < deckLength; high++) {
+  for (let low = 10; low <= 25; low++) {
+    for (let high = 35; high <= 50; high++) {
       const fixedMiddle = high - low < 20;
-      const a = fixedMiddle ? 30 - low : deckLength - high;
-      if (a < 1) continue;
-      // Fixed Middle leaves B at 30, so the two variable markers are A and C.
+      const a = fixedMiddle ? twiceAsHardMiddle - low : deckLength - high;
+      // In Fixed Middle, A and C are the two markers that change.
       const second = a + (fixedMiddle ? high : low);
       const answer = [model.at(a - 1), model.at(second - 1)];
       questions.push(question('twice-as-hard', [low, high], answer, answer, [], {

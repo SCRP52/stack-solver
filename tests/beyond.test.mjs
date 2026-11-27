@@ -203,7 +203,8 @@ test('Split defaults and unequal custom boundaries work for 2 through 5 piles', 
 test('Twice as Hard calculates ordered cut markers in both methods on every preset', () => {
   for (const { cards } of presets) {
     const questions = beyondQuestions(stackModel(cards), ['twice-as-hard'], { sequential: true });
-    assert.equal(questions.length, 969);
+    assert.equal(questions.length, 256);
+    assert.equal(questions.filter(q => q.answerLabels[1] === 'C').length, 55);
     assert.equal(new Set(questions.map(q => q.args.join())).size, questions.length);
     for (const [pair, positions, labels] of [
       ['16,39', [13, 29], ['A', 'B']],
@@ -215,11 +216,9 @@ test('Twice as Hard calculates ordered cut markers in both methods on every pres
       assert.deepEqual(q.answer, positions.map(position => cards[position - 1]), pair);
       assert.deepEqual(q.answerLabels, labels, pair);
     }
-    for (const pair of ['30,32', '29,30', '22,52']) {
-      assert.ok(!questions.some(q => q.args.join() === pair), pair);
-    }
     for (const q of questions) {
       const [low, high] = q.args;
+      assert.ok(low >= 10 && low <= 25 && high >= 35 && high <= 50);
       const [a, second] = q.answer.map(card => cards.indexOf(card) + 1);
       const fixed = q.answerLabels[1] === 'C';
       const [b, c] = fixed ? [30, second] : [second, 52];

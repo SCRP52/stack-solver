@@ -5,7 +5,7 @@ import { cardRotation, findCardCorners } from '../assistant-corners.mjs';
 import { choosePacketFace, hasCoveringEdge } from '../assistant-packet.mjs';
 import { createScanLog } from '../assistant-diagnostics.mjs';
 import { cameraScanSize, enableContinuousFocus, isFullHd, previewFrameBounds, requireFullHd } from '../assistant-camera.mjs';
-import { cardFrameLuminance, sharpenCardFrame, sourceSuitContrast } from '../assistant-detail.mjs';
+import { brightenCardShadows, cardFrameLuminance, sharpenCardFrame, sourceSuitContrast } from '../assistant-detail.mjs';
 
 const card = { rank: 'Q', suit: 'S' };
 
@@ -186,6 +186,31 @@ test('finds a small off-center index on a darker card and in its reflection', ()
   assert.equal(mirrored.rank.right, 179 - normal.rank.x);
   assert.ok(normal.leftEdge < normal.rightEdge);
   assert.ok(mirrored.rightEdge < mirrored.leftEdge);
+});
+
+test('a dim corner can be recovered independently of a much brighter background', () => {
+  const frame = cornerFrame({ x: 52, y: 47, brightness: 106 });
+  for (let y = 0; y < frame.height; y++) {
+    for (let x = 120; x < frame.width; x++) frame.data.fill(232, (y * frame.width + x) * 4, (y * frame.width + x) * 4 + 3);
+  }
+  const old = findCardCorners(frame);
+  const normalized = brightenCardShadows(frame, old.gray);
+  assert.ok(normalized);
+  assert.ok(!old.corners.some(({ rank }) => rank.x === 57));
+  const candidate = findCardCorners(normalized).corners.find(({ rank }) => rank.x === 57);
+  assert.ok(candidate);
+  assert.equal(candidate.suit.y, 66);
+  const background = (20 * frame.width + 160) * 4;
+  assert.equal(normalized.data[background], frame.data[background]);
+});
+
+test('finds the intact index when a finger covers the margin on one side', () => {
+  const frame = cornerFrame();
+  for (let y = 30; y < 70; y++) {
+    for (let x = 43; x < 72; x++) frame.data.set([155, 104, 89, 255], (y * frame.width + x) * 4);
+  }
+  const mustFind = findCardCorners(frame).corners.find(({ rank, suit }) => rank.x === 35 && rank.y === 34 && suit.y === 49);
+  assert.ok(mustFind?.partial);
 });
 
 test('does not propose a card when the suit index is hidden', () => {

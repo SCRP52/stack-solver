@@ -1,10 +1,10 @@
 import { alignedCornerMotion, cardCornerPose, createCardMemory, createStableCardGate } from './assistant-scan-logic.mjs?v=48';
-import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=41';
+import { cardRotation, findCardCorners, projectGlyph } from './assistant-corners.mjs?v=50';
 import { cardIndexShapes } from './assistant-card-shapes.mjs?v=40';
 import { choosePacketFace } from './assistant-packet.mjs?v=42';
-import { createScanLog } from './assistant-diagnostics.mjs?v=49';
+import { createScanLog } from './assistant-diagnostics.mjs?v=50';
 import { cameraScanSize, enableContinuousFocus, isFullHd, previewFrameBounds, requireFullHd } from './assistant-camera.mjs?v=48';
-import { cardFrameLuminance, sharpenCardFrame, sourceSuitContrast } from './assistant-detail.mjs?v=49';
+import { brightenCardShadows, cardFrameLuminance, sharpenCardFrame, sourceSuitContrast } from './assistant-detail.mjs?v=50';
 
 const $ = id => document.getElementById(id);
 const capture = $('assistant-frame');
@@ -260,7 +260,7 @@ function readSuit(mask, rank, suit) {
   return best.score >= .59 && gap >= minGap ? best : null;
 }
 
-function readCornerView(width, { rank, suit, rotation, leftEdge, rightEdge, upperEdge }) {
+function readCornerView(width, { rank, suit, rotation, leftEdge, rightEdge, upperEdge, partial }) {
   const sideEdge = Math.min(leftEdge, rightEdge);
   if (Math.min(sideEdge, upperEdge) > .5) return null;
   const bestSuit = readSuit(glyphMask(width, suit, rotation, false), rank, suit);
@@ -269,7 +269,7 @@ function readCornerView(width, { rank, suit, rotation, leftEdge, rightEdge, uppe
   // Near a distinct left or right card edge, we know which way the index was printed.
   let bestRank, mirrored;
   const edgeDifference = leftEdge - rightEdge;
-  if (Math.abs(edgeDifference) >= .28) {
+  if (!partial && Math.abs(edgeDifference) >= .28) {
     mirrored = edgeDifference > 0;
     bestRank = readRank(glyphMask(width, rank, rotation, mirrored), rank);
   } else {
@@ -281,6 +281,7 @@ function readCornerView(width, { rank, suit, rotation, leftEdge, rightEdge, uppe
     mirrored = even ? null : bestRank === flipped;
   }
   if (!bestRank) return null;
+  if (partial && (bestRank.score < .74 || bestSuit.score < .74)) return null;
   if ((sideEdge > .4 || (upperEdge > .6 && sideEdge > .15)) && (bestRank.score < .78 || bestSuit.score < .78)) return null;
   return { rank: bestRank.label, suit: bestSuit.label, score: (bestRank.score + bestSuit.score) / 2, suitScore: bestSuit.score, mirrored };
 }
@@ -305,22 +306,24 @@ function readCorner(width, corner) {
   return primary.score >= alternate.score ? primary : alternate;
 }
 
-function readPacketCorners(corners, gray, width, height, minConfidence = 0) {
+function readPacketCorners(corners, gray, width, height, mode) {
   const reads = [];
   for (const corner of corners) {
     const card = readCorner(width, corner);
-    if (!card || Math.min(card.score, card.suitScore) < minConfidence) continue;
-    const contrast = minConfidence ? sourceSuitContrast(gray, width, height, corner) : null;
-    if (contrast !== null && contrast < .45) continue;
+    if (!card || (mode && Math.min(card.score, card.suitScore) < .72)) continue;
+    const contrast = mode ? sourceSuitContrast(gray, width, height, corner) : null;
+    if (contrast !== null && contrast < (mode === 'sharpness' ? .45 : .32)) continue;
     const score = corner.quality + card.score * .45;
     reads.push({ card, corner: { ...corner, mirrored: card.mirrored }, score, contrast });
   }
   return { ...choosePacketFace(reads, { gray, width, height }), candidates: reads.length, corners: corners.length };
 }
 
-function readSharpenedCorners(pixels, gray) {
-  const { corners } = findCardCorners(sharpenCardFrame(pixels, gray));
-  return readPacketCorners(corners, gray, pixels.width, pixels.height, .72);
+function readAdjustedCorners(pixels, gray, mode) {
+  const adjusted = mode === 'lighting' ? brightenCardShadows(pixels, gray) : sharpenCardFrame(pixels, gray);
+  if (!adjusted) return null;
+  const { corners, paper } = findCardCorners(adjusted);
+  return { ...readPacketCorners(corners, gray, pixels.width, pixels.height, mode), paper, mode };
 }
 
 export function scanCardFrame(frame, history) {
@@ -328,12 +331,13 @@ export function scanCardFrame(frame, history) {
   const context = frame.getContext('2d', { willReadFrequently: true });
   const pixels = context.getImageData(0, 0, width, height);
   const previous = history.get(width);
-  let gray, paper, read, detail;
-  if (previous?.sharpened) {
-    // Avoid repeating both passes while the same soft corner stays in view.
+  let gray, paper, read, detail, attempted;
+  if (previous?.mode) {
+    // Continue the adjustment that just read the same physical corner.
     gray = cardFrameLuminance(pixels);
-    detail = readSharpenedCorners(pixels, gray);
-    const card = detail.best?.card;
+    attempted = previous.mode;
+    detail = readAdjustedCorners(pixels, gray, attempted);
+    const card = detail?.best?.card;
     if (card?.rank === previous.card.rank && card.suit === previous.card.suit) {
       read = detail;
       paper = true;
@@ -343,16 +347,20 @@ export function scanCardFrame(frame, history) {
     const normal = findCardCorners(pixels);
     ({ gray, paper } = normal);
     read = readPacketCorners(normal.corners, gray, width, height);
-    if (!read.best && !read.ambiguous && paper) {
-      detail ??= readSharpenedCorners(pixels, gray);
-      if (detail.best || detail.ambiguous || detail.corners > read.corners) read = detail;
+    if (!read.best && !read.ambiguous) {
+      if (!attempted) {
+        // Alternate the recovery passes so each frame gets at most one extra search.
+        attempted = paper && previous?.attempted === 'lighting' ? 'sharpness' : 'lighting';
+        detail = readAdjustedCorners(pixels, gray, attempted);
+      }
+      paper ||= Boolean(detail?.paper);
+      if (detail && (detail.best || detail.ambiguous || detail.corners > read.corners)) read = detail;
     }
   }
   const { best, ambiguous, candidates } = read;
   const pose = best ? cardCornerPose(best.corner) : undefined;
-  const sharpened = read === detail;
-  if (best) history.set(width, { gray, pose, sharpened, card: best.card });
-  else if (ambiguous || !paper) history.clear();
+  if (best) history.set(width, { gray, pose, mode: read.mode, card: best.card, attempted });
+  else history.set(width, { gray: ambiguous || !paper ? undefined : previous?.gray, pose: previous?.pose, attempted });
   return {
     card: best?.card ?? null,
     pose,
@@ -361,7 +369,8 @@ export function scanCardFrame(frame, history) {
     ambiguous,
     corners: read.corners,
     candidates,
-    sharpened,
+    adjustment: read.mode,
+    partial: best?.corner.partial,
     contrast: best?.contrast,
   };
 }
@@ -601,7 +610,7 @@ function scanLoop() {
     try {
       const ctx = capture.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(video, 0, 0, capture.width, capture.height);
-      const { card: found, pose, motion, paper, ambiguous, corners, candidates, sharpened, contrast } = scanCardFrame(capture, previousScanPixels);
+      const { card: found, pose, motion, paper, ambiguous, corners, candidates, adjustment, partial, contrast } = scanCardFrame(capture, previousScanPixels);
       const accepted = stableCardGate.update(found, motion, now, { pose, allowMiss: paper && !ambiguous });
       renderCard(now, accepted);
       if (found || ambiguous || !paper) unreadableSince = undefined;
@@ -609,7 +618,7 @@ function scanLoop() {
       const phase = accepted ? 'recognized' : ambiguous ? 'overlap' :
         !paper ? 'no-paper' : found ? 'settling' : !corners ? 'no-index' : 'unreadable-index';
       scanPhase(phase, { corners, candidates, card: accepted ? accepted.rank + accepted.suit : undefined,
-        sharpened: sharpened || undefined, contrast: contrast == null ? undefined : Math.round(contrast * 100),
+        adjustment, partial: partial || undefined, contrast: contrast == null ? undefined : Math.round(contrast * 100),
         motion: found ? (Number.isFinite(motion) ? Math.round(motion) : 'new-or-shifted') : undefined });
       scanLog?.frame(phase, performance.now() - now);
       if (accepted) updateStatus('Đã nhận diện', 'Card recognized');

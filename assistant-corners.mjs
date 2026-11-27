@@ -127,7 +127,12 @@ function findUprightCorners(glyphs, paper, width, height, rotation) {
       lightAt(left, suit.bottom + 1, right + 1, suit.bottom + margin + 1),
     ];
     const light = sides.reduce((sum, fraction) => sum + fraction, 0) / sides.length;
-    if (light < .68 || Math.min(sides[0], sides[1]) < .38) continue;
+    const partial = light < .68 || Math.min(sides[0], sides[1]) < .38;
+    if (partial) {
+      // The index can be intact while a finger covers one side or the paper below it.
+      if (light < .44 || Math.max(sides[0], sides[1]) < .68 || Math.max(sides[2], sides[3]) < .67) continue;
+      if (gap >= 2 && lightAt(left, rank.bottom + 1, right + 1, suit.y) < .52) continue;
+    }
 
     const edgeOffset = Math.max(4, Math.round(rank.h * .85));
     const edgeWidths = Math.max(2, Math.round(rank.h * .3));
@@ -138,7 +143,7 @@ function findUprightCorners(glyphs, paper, width, height, rotation) {
     const quality = light * .36 - centerDistance * .4 - dx / rank.h * .44 +
       (1 - Math.min(leftEdge, rightEdge)) * .19 + (1 - upperEdge) * .07 +
       (rank.double ? .04 : 0) - (rank.red !== suit.red ? .085 : 0);
-    corners.push({ rank, suit, rotation, quality, leftEdge, rightEdge, upperEdge });
+    corners.push({ rank, suit, rotation, quality: quality - (partial ? .08 : 0), leftEdge, rightEdge, upperEdge, partial });
   }
   return corners;
 }

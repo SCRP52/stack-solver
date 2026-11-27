@@ -5,8 +5,30 @@ import { cardRotation, findCardCorners } from '../assistant-corners.mjs';
 import { choosePacketFace, hasCoveringEdge } from '../assistant-packet.mjs';
 import { createScanLog } from '../assistant-diagnostics.mjs';
 import { cameraScanSize, enableContinuousFocus, isFullHd, previewFrameBounds, requireFullHd } from '../assistant-camera.mjs';
+import { cardFrameLuminance, sharpenCardFrame, sourceSuitContrast } from '../assistant-detail.mjs';
 
 const card = { rank: 'Q', suit: 'S' };
+
+test('soft ink detail gains contrast while a flat image stays unchanged', () => {
+  const width = 29, height = 21;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < width * height; i++) data.set([224, 224, 224, 255], i * 4);
+  const frame = { data, width, height };
+  assert.deepEqual(sharpenCardFrame(frame, cardFrameLuminance(frame)).data, data);
+
+  const point = 10 * width + 14;
+  for (let x = -4; x <= 4; x++) {
+    const delta = Math.abs(x) * 8;
+    data.set([172 + delta, 132 + delta, 132 + delta, 255], (point + x) * 4);
+  }
+  const gray = cardFrameLuminance(frame);
+  const detailed = sharpenCardFrame(frame, gray).data;
+  assert.ok(detailed[point * 4 + 1] < data[point * 4 + 1]);
+  assert.equal(detailed[point * 4] - detailed[point * 4 + 1], 40);
+  const suit = { x: 14, right: 14, y: 10, bottom: 10, h: 1, pixels: [point] };
+  const corner = { suit, rotation: cardRotation(0) };
+  assert.ok(sourceSuitContrast(gray, width, height, corner) < .45);
+});
 
 test('requests native Full HD and retries only a transposed resolution', async () => {
   const attempts = [];

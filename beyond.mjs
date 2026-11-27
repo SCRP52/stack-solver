@@ -55,13 +55,18 @@ const question = (kind, args, answer, focus, shown = [], extra = {}) => ({ kind,
 
 function twiceAsHardQuestions(model) {
   const questions = [];
-  // Leave one possible selection cut strictly between A and B and one below B.
+  // Leave at least one possible selection cut in each interval, (A, B) and (B, C).
   for (let low = 2; low <= deckLength - 3; low++) {
     for (let high = low + 2; high < deckLength; high++) {
-      const a = deckLength - high;
-      const b = a + low;
-      const answer = [model.at(a - 1), model.at(b - 1)];
-      questions.push(question('twice-as-hard', [low, high], answer, answer, [], { entryLabels: ['A', 'B'] }));
+      const fixedMiddle = high - low < 20;
+      const a = fixedMiddle ? 30 - low : deckLength - high;
+      if (a < 1) continue;
+      // Fixed Middle leaves B at 30, so the two variable markers are A and C.
+      const second = a + (fixedMiddle ? high : low);
+      const answer = [model.at(a - 1), model.at(second - 1)];
+      questions.push(question('twice-as-hard', [low, high], answer, answer, [], {
+        answerLabels: ['A', fixedMiddle ? 'C' : 'B'],
+      }));
     }
   }
   return questions;

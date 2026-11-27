@@ -3,8 +3,8 @@ import { message } from './i18n.mjs';
 import { ranks } from './solver.mjs';
 import { advanced, answerChoices, basic, grade, questionSet, stackModel } from './drills.mjs?v=33';
 import { drillCopy, drillDetails, groupCopy, groupDetails } from './trainer-copy.mjs?v=30';
-import { beyond, beyondQuestions, isJazzing, isRecallOrder, isSplit, parseSplit, splitDefaults } from './beyond.mjs?v=42';
-import { beyondDetails, beyondDrills, beyondGroups, handNames, specialBeyondPrompt } from './beyond-copy.mjs?v=42';
+import { beyond, beyondQuestions, isJazzing, isRecallOrder, isSplit, parseSplit, splitDefaults } from './beyond.mjs?v=43';
+import { beyondDetails, beyondDrills, beyondGroups, handNames, specialBeyondPrompt } from './beyond-copy.mjs?v=43';
 import { findJazzOptions, gradeJazz, jazzLength, jazzPositions, maxJazzGap, requiresBottom } from './jazzing.mjs?v=34';
 import { activeStackKey, readProgress, saveProgress, slowCards, summarize, weakCards } from './trainer-progress.mjs';
 import { exportStackCsv, importStackCsv } from './stack-csv.mjs';
@@ -30,7 +30,10 @@ const groupText = key => t(...(beyondGroups[key] ?? groupCopy[key]));
 const drillName = kind => t(...drillText(kind));
 const promptText = question => specialBeyondPrompt(question, lang) ??
   t(...drillText(question.kind).slice(2)).replace(/\{(\d+)\}/g, (_, index) => question.args[index]);
-const formatAnswer = ({ answer }) => answer.map(item => typeof item === 'number' ? item : cardLabel(item)).join(' · ');
+const formatAnswer = ({ answer, answerLabels }) => answer.map((item, index) => {
+  const value = typeof item === 'number' ? item : cardLabel(item);
+  return answerLabels ? `${answerLabels[index]} ${value}` : value;
+}).join(' · ');
 const suitKeys = [['S', 'Bích', 'Spades'], ['H', 'Cơ', 'Hearts'], ['C', 'Chuồn', 'Clubs'], ['D', 'Rô', 'Diamonds']];
 const isRecallPick = kind => beyond.recall.includes(kind) && !isRecallOrder(kind);
 const hasBoard = kind => kind === 'restack' || isRecallOrder(kind) || isRecallPick(kind) || isSplit(kind) || isJazzing(kind);

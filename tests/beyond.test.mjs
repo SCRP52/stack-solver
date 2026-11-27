@@ -200,19 +200,33 @@ test('Split defaults and unequal custom boundaries work for 2 through 5 piles', 
   }
 });
 
-test('Twice as Hard calculates ordered cut markers on the selected stack for every eligible number pair', () => {
+test('Twice as Hard calculates ordered cut markers in both methods on every preset', () => {
   for (const { cards } of presets) {
     const questions = beyondQuestions(stackModel(cards), ['twice-as-hard'], { sequential: true });
-    assert.equal(questions.length, 1176);
+    assert.equal(questions.length, 969);
     assert.equal(new Set(questions.map(q => q.args.join())).size, questions.length);
-    assert.deepEqual(questions.find(q => q.args.join() === '18,43').answer, [cards[8], cards[26]]);
+    for (const [pair, positions, labels] of [
+      ['16,39', [13, 29], ['A', 'B']],
+      ['23,37', [7, 44], ['A', 'C']],
+      ['20,39', [10, 49], ['A', 'C']],
+      ['20,40', [12, 32], ['A', 'B']],
+    ]) {
+      const q = questions.find(item => item.args.join() === pair);
+      assert.deepEqual(q.answer, positions.map(position => cards[position - 1]), pair);
+      assert.deepEqual(q.answerLabels, labels, pair);
+    }
+    for (const pair of ['30,32', '29,30', '22,52']) {
+      assert.ok(!questions.some(q => q.args.join() === pair), pair);
+    }
     for (const q of questions) {
       const [low, high] = q.args;
-      const [a, b] = q.answer.map(card => cards.indexOf(card) + 1);
-      assert.ok(a >= 1 && a + 1 < b && b < 51);
-      const reordered = [...cards.slice(a, b), ...cards.slice(b), ...cards.slice(0, a)];
-      assert.equal(reordered[low - 1], q.answer[1]);
-      assert.equal(reordered[high - 1], cards[51]);
+      const [a, second] = q.answer.map(card => cards.indexOf(card) + 1);
+      const fixed = q.answerLabels[1] === 'C';
+      const [b, c] = fixed ? [30, second] : [second, 52];
+      assert.equal(fixed, high - low < 20);
+      assert.ok(a >= 1 && a + 1 < b && b + 1 < c && c <= 52);
+      assert.equal(cards.slice(a, b).length, low);
+      assert.equal(cards.slice(a, c).length, high);
       assert.equal(grade(q, q.answer), true);
       assert.equal(grade(q, [...q.answer].reverse()), false);
     }
